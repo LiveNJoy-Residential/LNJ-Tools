@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Output — generated Excel reports (not committed)
+output/*.xlsx
+output/*.txt
+
+# Exports — raw ResMan CSV exports (not committed)
+exports/
+
+# Data — CSV source files (not committed — contain resident PII)
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
