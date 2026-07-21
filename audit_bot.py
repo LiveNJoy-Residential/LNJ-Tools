@@ -1,39 +1,40 @@
-"""
+﻿"""
 ResMan Concession & Recurring Revenue Integrity Audit Bot
 ==========================================================
 Authors  : Concession Audit Engine + Revenue Integrity Engine
 Company  : LiveNjoy Residential  |  System: ResMan  |  Period: February 2026
 
-FILE → DATA FOLDER MAPPING
+FILE â†’ DATA FOLDER MAPPING
 ---------------------------
-data/transactions/  ← Transaction List Reports (Credits)
+data/transactions/  â† Transaction List Reports (Credits)
                        e.g. "CAI Transaction List (Credits) - Feb 2026.csv"
-                       → Concession Audit Engine: actual concession postings
+                       â†’ Concession Audit Engine: actual concession postings
 
-data/leases/        ← New and Renewed Leases
+data/leases/        â† New and Renewed Leases
                        e.g. "Crossing at Irving New and Renewed Leases.csv"
-                       → Concession Audit Engine: legal approved concession amounts
+                       â†’ Concession Audit Engine: legal approved concession amounts
 
-data/edits/         ← Edited Transactions by User
+data/edits/         â† Edited Transactions by User
                        e.g. "Crossing at Irving Edited Transactions by User.csv"
-                       → Override Audit: who reversed / changed what
+                       â†’ Override Audit: who reversed / changed what
 
-data/recurring/     ← Transaction Projections (Recurring)
+data/recurring/     â† Transaction Projections (Recurring)
                        e.g. "Crossings at Irving Recurring Transaction Projection.csv"
-                       → Daniel Stage 1: what SHOULD post each month per unit
+                       â†’ Daniel Stage 1: what SHOULD post each month per unit
 
-data/rent_rolls/    ← Rent Rolls
+data/rent_rolls/    â† Rent Rolls
                        e.g. "Crossings at Irving Rent Roll.csv"
-                       → Daniel Stage 2: what IS actually configured per unit
+                       â†’ Daniel Stage 2: what IS actually configured per unit
 
-data/activity/      ← Resident Activity reports
+data/activity/      â† Resident Activity reports
                        e.g. "Crossing at Irving Resident Activity.csv"
-                       → Move-in dates, current lease dates, assigned manager
+                       â†’ Move-in dates, current lease dates, assigned manager
 
 NOTE: Resident Ledgers are PDFs -- cannot be auto-processed.
       They live in exports/Resident Ledgers/ for manual review only.
 """
 
+import io
 import os
 import re
 import warnings
@@ -86,7 +87,7 @@ RECENT_MOVEIN_DAYS        = 60
 
 AUDIT_MONTH = "Jun 2026"   # update each month
 
-# Categories exempt from "Missing Standard Charge" — these are unit-specific add-ons.
+# Categories exempt from "Missing Standard Charge" â€” these are unit-specific add-ons.
 # Per Daniel Twito: parking, pet fees, and washer/dryer are not universal.
 OPTIONAL_CHARGE_KEYWORDS = {
     "carport", "parking", "pet rent", "pet fee", "washer", "dryer",
@@ -95,15 +96,15 @@ OPTIONAL_CHARGE_KEYWORDS = {
 
 # Net Effective Rent floors by property and bedroom type (Daniel Twito, June 2026).
 # NER = recurring_rent + recurring_concession  (concession is stored negative).
-# Flag when NER < floor — catches double-discounts and below-floor net rents.
+# Flag when NER < floor â€” catches double-discounts and below-floor net rents.
 PROPERTY_NER_FLOORS = {
     "Parks on Taylor":     {"1BR": 799, "2BR": 899},
     "Highland Park":       {"1BR": 799, "2BR": 999},
     "Valencia Plaza":      {"1BR": 999, "2BR": None},
     "Western Station":     {"1BR": None, "2BR": None},   # floor varies by floorplan
-    "Village Green":       {"1BR": None, "2BR": None},   # $300 off market — see PROPERTY_NER_DISCOUNT
-    "Crossings at Irving": {"1BR": None, "2BR": None},   # $100 off market — see PROPERTY_NER_DISCOUNT
-    "La Prada":            {"1BR": None, "2BR": None},   # $100 off market — see PROPERTY_NER_DISCOUNT
+    "Village Green":       {"1BR": None, "2BR": None},   # $300 off market â€” see PROPERTY_NER_DISCOUNT
+    "Crossings at Irving": {"1BR": None, "2BR": None},   # $100 off market â€” see PROPERTY_NER_DISCOUNT
+    "La Prada":            {"1BR": None, "2BR": None},   # $100 off market â€” see PROPERTY_NER_DISCOUNT
 }
 
 # For properties whose NER floor is dynamic (market rent minus a discount),
@@ -114,15 +115,15 @@ PROPERTY_NER_DISCOUNT = {
     "Village Green":       300,   # $300 off market (per Daniel Twito, CONTEXT.md)
     "Crossings at Irving": 100,   # $100 off market
     "La Prada":            100,   # $100 off market
-    # Western Station: floor varies by floorplan — not a simple market-minus rule; skip
+    # Western Station: floor varies by floorplan â€” not a simple market-minus rule; skip
 }
 
-# ─── Official monthly fee schedule per property ───────────────────────────────
+# â”€â”€â”€ Official monthly fee schedule per property â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Source: Fee sheet .docx files provided by Daniel Twito (March 2026).
 # Used to validate charge AMOUNTS in the Recurring Projection.
 # Per Daniel: $1 is the variance cutoff for charge amount comparisons.
-# NOTE: La Prada omitted — no fee sheet provided.
-# ─────────────────────────────────────────────────────────────────────────────
+# NOTE: La Prada omitted â€” no fee sheet provided.
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 PROPERTY_FEE_SCHEDULE = {
     "Crossings at Irving": [
         {"name": "Billing Fee",         "keywords": ["billing fee"],                       "amount": 5.00,  "optional": False},
@@ -204,10 +205,10 @@ RISK_MEDIUM   = "MEDIUM"
 RISK_MAP = {
     # John's Rules
     "Post-Term Credit":               RISK_CRITICAL,
-    "Recurring Concession >$700":     RISK_HIGH,    # single month ≥$700 = HIGH per Daniel (Jun 4); multi-month = CRITICAL via Full Rent Recurring Offset
-    "Missing Addendum":               RISK_HIGH,       # credit posted, no RR setup — HIGH not CRITICAL per Daniel June 4
+    "Recurring Concession >$700":     RISK_HIGH,    # single month â‰¥$700 = HIGH per Daniel (Jun 4); multi-month = CRITICAL via Full Rent Recurring Offset
+    "Missing Addendum":               RISK_HIGH,       # credit posted, no RR setup â€” HIGH not CRITICAL per Daniel June 4
     "Missing Lease":                  RISK_HIGH,
-    # "Invalid Credit Code" removed — John confirmed (March 10, 2026) that
+    # "Invalid Credit Code" removed â€” John confirmed (March 10, 2026) that
     # descriptions are freeform identifiers with no standard rule; R4 disabled.
     "Concession Amount Mismatch":     RISK_HIGH,        # RR amount != TX amount
     "Not Properly Posted":            RISK_HIGH,        # RR setup but not in TX
@@ -226,7 +227,7 @@ RISK_MAP = {
     "$0 Net Rent (Recent Move-in)":   RISK_MEDIUM,
     # Fee Schedule Check
     "Fee Schedule Violation":         RISK_HIGH,
-    # NER Engine (Stage 1B) — Daniel Twito June 2026 methodology
+    # NER Engine (Stage 1B) â€” Daniel Twito June 2026 methodology
     "Full Rent Recurring Offset":     RISK_CRITICAL,   # concession = rent for 2+ months
     "Net Effective Rent Below Floor": RISK_CRITICAL,   # NER below property floor
     "Double-Discount Setup":          RISK_CRITICAL,   # rent reduced + concession on top
@@ -313,7 +314,7 @@ def get_bedroom_type(unit_type: str) -> str:
     """Map ResMan unit type code to bedroom count label (1BR / 2BR / 3BR).
     Logic: if the numeric suffix is 3 or higher, classify as 3BR.
     Otherwise use the letter prefix (A = 1BR, B = 2BR, C/D = 3BR).
-    Examples: A1 →1BR, A2 →1BR, B2 →2BR, B3 →3BR, B3-P →3BR, A1-P →1BR.
+    Examples: A1 â†’1BR, A2 â†’1BR, B2 â†’2BR, B3 â†’3BR, B3-P â†’3BR, A1-P â†’1BR.
     """
     clean = unit_type.strip().upper()
     m = re.search(r'(\d+)', clean)
@@ -353,18 +354,28 @@ def _csv_files(folder: str) -> list:
     return files
 
 
-def _read_csv(fpath: str, **kwargs) -> pd.DataFrame:
-    """Try utf-8-sig first, fall back to cp1252 (Windows ResMan exports)."""
+def _read_csv(fpath_or_buffer, **kwargs) -> pd.DataFrame:
+    """Accept a file path or file-like object (BytesIO / UploadedFile). Try encodings in order."""
+    if hasattr(fpath_or_buffer, "read"):
+        if hasattr(fpath_or_buffer, "seek"):
+            fpath_or_buffer.seek(0)
+        raw = fpath_or_buffer.read()
+        for enc in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                return pd.read_csv(io.BytesIO(raw), encoding=enc, **kwargs)
+            except UnicodeDecodeError:
+                continue
+        raise ValueError("Could not decode uploaded file with utf-8-sig, cp1252, or latin-1.")
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
-            return pd.read_csv(fpath, encoding=enc, **kwargs)
+            return pd.read_csv(fpath_or_buffer, encoding=enc, **kwargs)
         except UnicodeDecodeError:
             continue
-    raise ValueError(f"Could not decode {fpath} with utf-8-sig, cp1252, or latin-1.")
+    raise ValueError(f"Could not decode {fpath_or_buffer} with utf-8-sig, cp1252, or latin-1.")
 
 
 # -- 2-A  Transaction List (Credits) ----------------------------------------
-def load_transaction_list(folder: str) -> pd.DataFrame:
+def load_transaction_list(folder: str, uploaded_files=None) -> pd.DataFrame:
     """
     ResMan Transaction List format:
       Rows 1-6  : property header block (skip)
@@ -384,10 +395,11 @@ def load_transaction_list(folder: str) -> pd.DataFrame:
       - We keep every row that has a numeric Unit value.
     """
     all_data = []
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            df = _read_csv(fpath, skiprows=6, dtype=str)
+            df = _read_csv(src, skiprows=6, dtype=str)
             df.columns = [str(c).strip() for c in df.columns]
             df["_prop"] = derive_property(fname)
             df["Source_File"] = fname
@@ -396,7 +408,7 @@ def load_transaction_list(folder: str) -> pd.DataFrame:
             # "Charge - Rent") which ResMan writes into the first (Date) column.
             # Only keep rows that belong to a concession-relevant "Credit - " section.
             # Excluded sections:
-            #   "Credit - Renters Insurance Premium Credit" — these are resident
+            #   "Credit - Renters Insurance Premium Credit" â€” these are resident
             #   insurance PAYMENT rows (Description='Payment'), not concessions.
             #
             # IMPORTANT: ALL section header types must be captured in the ffill so
@@ -449,7 +461,7 @@ def load_transaction_list(folder: str) -> pd.DataFrame:
 
 
 # -- 2-B  New & Renewed Leases -----------------------------------------------
-def load_leases(folder: str) -> pd.DataFrame:
+def load_leases(folder: str, uploaded_files=None) -> pd.DataFrame:
     """
     ResMan New & Renewed Leases format:
       Rows 1-5  : header block (skip)
@@ -465,10 +477,11 @@ def load_leases(folder: str) -> pd.DataFrame:
     One Time Conc.= approved one-time concession
     """
     all_data = []
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            df = _read_csv(fpath, skiprows=5, dtype=str)
+            df = _read_csv(src, skiprows=5, dtype=str)
             df.columns = [str(c).strip() for c in df.columns]
             df["Property"]    = derive_property(fname)
             df["Source_File"] = fname
@@ -495,7 +508,7 @@ def load_leases(folder: str) -> pd.DataFrame:
 
 
 # -- 2-C  Edited Transactions by User ----------------------------------------
-def load_edits(folder: str) -> pd.DataFrame:
+def load_edits(folder: str, uploaded_files=None) -> pd.DataFrame:
     """
     ResMan Edited Transactions by User format:
       Rows 1-5  : header block (skip)
@@ -512,10 +525,11 @@ def load_edits(folder: str) -> pd.DataFrame:
       Amount Change: Edited Amount populated != Amount -> revenue_impact = edited - orig
     """
     all_data = []
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            df = _read_csv(fpath, skiprows=5, dtype=str, header=0)
+            df = _read_csv(src, skiprows=5, dtype=str, header=0)
             df.columns = [str(c).strip() for c in df.columns]
             prop = derive_property(fname)
 
@@ -539,7 +553,7 @@ def load_edits(folder: str) -> pd.DataFrame:
 
                     if not is_reversal and not is_amt_change:
                         continue
-                    # Skip reversals of $0 transactions — no real revenue impact
+                    # Skip reversals of $0 transactions â€” no real revenue impact
                     if is_reversal and orig_amt == 0.0:
                         continue
 
@@ -574,7 +588,7 @@ def load_edits(folder: str) -> pd.DataFrame:
 
 
 # -- 2-D  Transaction Projection (Recurring) ---------------------------------
-def load_transaction_projection(folder: str, audit_month: str = AUDIT_MONTH) -> pd.DataFrame:
+def load_transaction_projection(folder: str, audit_month: str = AUDIT_MONTH, uploaded_files=None) -> pd.DataFrame:
     """
     ResMan Transaction Projection format (3-section file):
       Section 1: 'Recurring Transactions by Unit Type'   (summary)
@@ -589,10 +603,11 @@ def load_transaction_projection(folder: str, audit_month: str = AUDIT_MONTH) -> 
     We extract the column matching audit_month (e.g. 'Feb 2026').
     """
     all_data = []
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            raw  = _read_csv(fpath, header=None, dtype=str)
+            raw  = _read_csv(src, header=None, dtype=str)
             prop = derive_property(fname)
 
             # Find 'Recurring Transactions by Unit' section marker
@@ -651,10 +666,10 @@ def load_transaction_projection(folder: str, audit_month: str = AUDIT_MONTH) -> 
     return pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
 
 
-def load_transaction_projection_all_months(folder: str) -> pd.DataFrame:
+def load_transaction_projection_all_months(folder: str, uploaded_files=None) -> pd.DataFrame:
     """
     Like load_transaction_projection but extracts ALL month columns.
-    Returns long-format DataFrame — one row per (unit, category, month):
+    Returns long-format DataFrame â€” one row per (unit, category, month):
       Property, Unit, Resident, Unit_Type, Category, Month_Label, Amount, Source_File
 
     Used by the NER engine (Stage 1B) to detect multi-month recurring anomalies:
@@ -663,10 +678,11 @@ def load_transaction_projection_all_months(folder: str) -> pd.DataFrame:
     """
     all_data  = []
     month_re  = re.compile(r"^[A-Z][a-z]{2} \d{4}$")
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            raw  = _read_csv(fpath, header=None, dtype=str)
+            raw  = _read_csv(src, header=None, dtype=str)
             prop = derive_property(fname)
 
             marker_rows = raw[
@@ -721,7 +737,7 @@ def load_transaction_projection_all_months(folder: str) -> pd.DataFrame:
 
 
 # -- 2-E  Rent Roll ----------------------------------------------------------
-def load_rent_roll(folder: str) -> pd.DataFrame:
+def load_rent_roll(folder: str, uploaded_files=None) -> pd.DataFrame:
     """
     ResMan Rent Roll format (multi-row per unit):
       Rows 1-6  : header block (skip)
@@ -741,10 +757,11 @@ def load_rent_roll(folder: str) -> pd.DataFrame:
       [36] Balance
     """
     all_data = []
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            raw  = _read_csv(fpath, skiprows=6, header=0, dtype=str)
+            raw  = _read_csv(src, skiprows=6, header=0, dtype=str)
             prop = derive_property(fname)
 
             # Pad to at least 37 columns
@@ -780,7 +797,7 @@ def load_rent_roll(folder: str) -> pd.DataFrame:
                     continue
 
                 if re.match(r"^\d+$", c0):
-                    # Unit header row — strip ResMan status markers (* = NTV, ** = MTM)
+                    # Unit header row â€” strip ResMan status markers (* = NTV, ** = MTM)
                     current_unit        = clean_unit(c0)
                     current_resident    = re.sub(r"\*+", "", c5).strip() if c5 not in ("", "nan") else "Unknown"
                     current_type        = c2
@@ -836,7 +853,7 @@ def load_rent_roll(folder: str) -> pd.DataFrame:
 
 
 # -- 2-F  Resident Activity --------------------------------------------------
-def load_resident_activity(folder: str) -> pd.DataFrame:
+def load_resident_activity(folder: str, uploaded_files=None) -> pd.DataFrame:
     """
     ResMan Resident Activity format (very wide, ~73 columns):
       Rows 1-6  : header block (skip)
@@ -852,10 +869,11 @@ def load_resident_activity(folder: str) -> pd.DataFrame:
       (last non-blank after col 43 = Manager)
     """
     all_data = []
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
-            raw  = _read_csv(fpath, skiprows=6, header=0, dtype=str)
+            raw  = _read_csv(src, skiprows=6, header=0, dtype=str)
             prop = derive_property(fname)
 
             # Drop the 'Adjusted Lease End Date' overflow header row
@@ -907,7 +925,7 @@ def load_resident_activity(folder: str) -> pd.DataFrame:
 
 
 # -- 2-G  Market Rent Schedule Detail ----------------------------------------
-def load_market_rent_schedule(folder: str) -> dict:
+def load_market_rent_schedule(folder: str, uploaded_files=None) -> dict:
     """
     ResMan Market Rent Schedule Detail format:
       Rows 1-5  : header block (property name, company, report title, date, printed)
@@ -929,11 +947,12 @@ def load_market_rent_schedule(folder: str) -> dict:
     the floor is defined as (market_rent - PROPERTY_NER_DISCOUNT).
     """
     lookup = {}
-    for fname in _csv_files(folder):
-        fpath = os.path.join(folder, fname)
+    _sources = ([(f.name, f) for f in uploaded_files] if uploaded_files is not None
+                else [(fn, os.path.join(folder, fn)) for fn in _csv_files(folder)])
+    for fname, src in _sources:
         try:
             prop = derive_property(fname)
-            df   = _read_csv(fpath, skiprows=5, dtype=str)
+            df   = _read_csv(src, skiprows=5, dtype=str)
             df.columns = [str(c).strip() for c in df.columns]
 
             # Keep only rows where the first column is a numeric unit number
@@ -986,25 +1005,25 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
 
     NOTE: Rules 5/6/7 use the Rent Roll concession rows (negative amount rows
     with concession keywords in Description) as the "approved concession" source.
-    This is the LiveNjoy data reality — approved concessions are stored as discounted
+    This is the LiveNjoy data reality â€” approved concessions are stored as discounted
     rent line items on the Rent Roll, not in a separate Rec_Conc field.
     """
     print("\n[CONCESSION AUDIT ENGINE] Running concession audit rules...")
     flags = []
 
     # Only skip if BOTH transaction list AND rent roll have no data.
-    # R7 (Not Properly Posted) works from the Rent Roll side — it flags units
+    # R7 (Not Properly Posted) works from the Rent Roll side â€” it flags units
     # where the Rent Roll shows a concession setup but no credit was posted in
     # the Transaction List. When the TX list is empty (e.g. no Credit sections
     # were exported for the month), R7 should still fire for all RR concession
-    # units. R1–R4 (which need TX rows) are simply skipped when df_trans is empty.
+    # units. R1â€“R4 (which need TX rows) are simply skipped when df_trans is empty.
     no_tx   = df_trans is None or df_trans.empty
     no_rr   = df_rent_roll is None or df_rent_roll.empty
     if no_tx and no_rr:
         print("  [SKIP] No transaction data and no rent roll data.")
         return pd.DataFrame()
     if no_tx:
-        print("  [WARN] No Credit rows in Transaction List — R1/R2/R3/R4 skipped. "
+        print("  [WARN] No Credit rows in Transaction List â€” R1/R2/R3/R4 skipped. "
               "R7 (Not Properly Posted) will still run from Rent Roll.")
 
     # Keywords that identify a concession/discount row on the Rent Roll
@@ -1035,7 +1054,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
                 lease_lookup[key] = row
 
     # Rent Roll lease-end lookup: (prop, unit) -> lease_end date
-    # Used for R2 (Missing Lease) — checks whether a unit currently has an active
+    # Used for R2 (Missing Lease) â€” checks whether a unit currently has an active
     # lease. This is far more reliable than checking only new/renewed leases for
     # the current month, which would miss all ongoing leases signed in prior months.
     rr_lease_end_lookup   = {}
@@ -1064,7 +1083,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
 
     # Transaction List credit lookup: (prop, unit) -> NET credit after reversals
     # Per Daniel Twito (June 4 meeting): the bot must use the NET of all concession
-    # activity — positive credits minus reversed credits — not just the sum of
+    # activity â€” positive credits minus reversed credits â€” not just the sum of
     # positives. A $346 credit that was then reversed and replaced with a $500
     # credit should show as $500 net, not $846 total positives.
     _R5_SKIP_SECTIONS = {"Credit - Resident Referral", "Credit - Employee Unit Rent Allowance"}
@@ -1086,7 +1105,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
             # Reversals are stored as negative amounts in the transaction list.
             net = grp["Amount"].sum()
             # Always add to lookup if concession activity exists (even if net=0 due to
-            # full reversal) so R7 (Not Properly Posted) doesn't fire — R6 (Concession
+            # full reversal) so R7 (Not Properly Posted) doesn't fire â€” R6 (Concession
             # Amount Mismatch) will correctly catch the $0 posted vs RR approved amount.
             if net >= 0:
                 tx_credit_lookup[(prop, unit)] = net
@@ -1104,7 +1123,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
             rr_market_lookup[(prop, unit)] = grp["Market_Rent"].iloc[0]
 
     # ------------------------------------------------------------------
-    # R1, R2, R3, R4 — per transaction-list unit loop
+    # R1, R2, R3, R4 â€” per transaction-list unit loop
     # (skipped when no Credit rows were exported from ResMan)
     # ------------------------------------------------------------------
     for (prop, unit), grp in (df_trans.groupby(["Property", "Unit"]) if not no_tx else []):
@@ -1116,7 +1135,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
         active_credits = grp[~grp["Is_Reversal"] & (grp["Amount"] > 0)]
         net_actual     = grp["Amount"].sum()
 
-        # R1 — Post-Term Credit
+        # R1 â€” Post-Term Credit
         if lease_end is not None and pd.notna(lease_end):
             post_term = active_credits[
                 active_credits["Date"].notna() &
@@ -1129,7 +1148,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
                     f"Description: '{row['Description']}'.",
                     row["Amount"], src))
 
-        # R2 — Missing Lease
+        # R2 â€” Missing Lease
         # A unit is considered to have an active lease if its Lease_End on the
         # Rent Roll is today or in the future (or is missing/blank, which means
         # MTM or no end date set). Flag only if Lease_End is clearly in the past.
@@ -1147,23 +1166,23 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
             flags.append(make_flag(prop, unit, resident, "Missing Lease",
                 f"${net_actual:.2f} net credit posted but Unit {unit} at {prop} "
                 f"has no active lease on the Rent Roll "
-                f"(Lease: {lease_start_str} – {lease_end_str}). Cannot verify authorization.",
+                f"(Lease: {lease_start_str} â€“ {lease_end_str}). Cannot verify authorization.",
                 net_actual, src))
 
-        # R3 — Large Credit (>= $700 single transaction)
+        # R3 â€” Large Credit (>= $700 single transaction)
         for _, row in active_credits[active_credits["Amount"] >= CONCESSION_CRITICAL_AMT].iterrows():
             flags.append(make_flag(prop, unit, resident, "Recurring Concession >$700",
                 f"Single credit of ${row['Amount']:.2f} exceeds $700 threshold. "
                 f"Description: '{row['Description']}'. Requires VP approval.",
                 row["Amount"], src))
 
-        # R4 — Non-Standard Description: DISABLED (March 10, 2026)
+        # R4 â€” Non-Standard Description: DISABLED (March 10, 2026)
         # John confirmed descriptions are freeform identifiers with no standard rule.
         # Approved codes (CONR, CRTCO, EMPL, MCCR, RRFee) are confirmed but there is
         # no separate code column in the ResMan export to check against.
 
     # ------------------------------------------------------------------
-    # R5, R6, R7 — cross-check Rent Roll concession setup vs Transaction List
+    # R5, R6, R7 â€” cross-check Rent Roll concession setup vs Transaction List
     # ------------------------------------------------------------------
     all_units = set(list(rr_conc_lookup.keys()) + list(tx_credit_lookup.keys()))
 
@@ -1185,15 +1204,15 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
         src = tx_src_lookup.get((prop, unit), rr_src_lookup.get((prop, unit), ""))
         market = rr_market_lookup.get((prop, unit), 0.0)
 
-        # R5 — Missing Addendum: DISABLED (April 30, 2026)
+        # R5 â€” Missing Addendum: DISABLED (April 30, 2026)
         # Addenda are stored as PDFs in ResMan's Documents section, which is not
         # accessible from CSV exports. The Rent Roll concession row is not a
-        # reliable proxy for addendum existence — John confirmed all flagged
+        # reliable proxy for addendum existence â€” John confirmed all flagged
         # addenda exist. This rule generated only false positives.
         # if in_tx and not in_rr:
         #     ...
 
-        # R6 — Amount Mismatch: both exist but net amounts differ
+        # R6 â€” Amount Mismatch: both exist but net amounts differ
         # Uses NET posted amount (after reversals) per Daniel Twito June 4 meeting.
         if in_tx and in_rr:
             delta    = abs(posted_amt - approved_amt)
@@ -1208,7 +1227,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
                         parts.append(f"{sign}${amt:.0f} ({desc[:80]})")
                     activity = "  |  ".join(parts)
                     if posted_amt == 0:
-                        # All concession activity was reversed — net $0 posted
+                        # All concession activity was reversed â€” net $0 posted
                         detail_text = (
                             f"Rent Roll has a -${approved_amt:.0f}/mo concession setup, "
                             f"but all posted credits were reversed: {activity}. "
@@ -1221,7 +1240,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
                         detail_text = (
                             f"Rent Roll setup: -${approved_amt:.0f}/mo concession. "
                             f"Transaction activity: {activity}. "
-                            f"Net posted: ${posted_amt:.0f} — ${delta:.0f} "
+                            f"Net posted: ${posted_amt:.0f} â€” ${delta:.0f} "
                             f"{direction} than Rent Roll ({pct_diff*100:.0f}% variance). "
                             f"Verify signed addendum authorizes the net amount posted."
                         )
@@ -1236,7 +1255,7 @@ def run_concession_audit_engine(df_trans: pd.DataFrame, df_leases: pd.DataFrame,
                 flags.append(make_flag(prop, unit, resident, "Concession Amount Mismatch",
                     detail_text, delta, src))
 
-        # R7 — Not Properly Posted: concession on Rent Roll but nothing posted
+        # R7 â€” Not Properly Posted: concession on Rent Roll but nothing posted
         elif in_rr and not in_tx:
             rr_desc = rr_conc_desc_lookup.get((prop, unit), "")
             desc_note = f" (Rent Roll entry: '{rr_desc}')" if rr_desc else ""
@@ -1297,7 +1316,7 @@ def run_revenue_integrity_engine(
             for category, cat_grp in prop_grp.groupby("Category"):
                 if not category:
                     continue
-                # Skip optional charge types — parking, pet fees, W/D are unit-specific
+                # Skip optional charge types â€” parking, pet fees, W/D are unit-specific
                 if any(kw in category.lower() for kw in OPTIONAL_CHARGE_KEYWORDS):
                     continue
                 units_with = cat_grp[cat_grp["Amount"] > 0]["Unit"].nunique()
@@ -1323,7 +1342,7 @@ def run_revenue_integrity_engine(
 
         # 3.2 -- AMOUNT CONSISTENCY: flag within the same Property + Unit Type + Category
         # (comparing same unit type only avoids false positives across 1BR vs 2BR etc.)
-        # NOTE: "Rent" is excluded from Minor variance — rent legitimately varies between
+        # NOTE: "Rent" is excluded from Minor variance â€” rent legitimately varies between
         # units of the same type (different lease terms, negotiated rates). Significant rent
         # outliers (>=20% and >=$5) are still caught by Major variance. Rent mismatches
         # against the Rent Roll are fully covered by Stage 2 "Posted vs Recurring Mismatch".
@@ -1346,11 +1365,11 @@ def run_revenue_integrity_engine(
                 pct_var = var / mode_amt
                 if var >= 1.0:
                     is_major = pct_var >= 0.20 and var >= 5.0
-                    # Skip rent variance entirely — already covered by Stage 2
+                    # Skip rent variance entirely â€” already covered by Stage 2
                     # "Posted vs Recurring Mismatch" which compares against actual Rent Roll
                     if is_rent:
                         continue
-                    # Skip optional charges — Fee Schedule Check owns their amount validation
+                    # Skip optional charges â€” Fee Schedule Check owns their amount validation
                     if is_optional:
                         continue
                     rule = "Major Charge Amount Variance" if is_major \
@@ -1382,14 +1401,14 @@ def run_revenue_integrity_engine(
                     flags.append(make_flag(prop, unit, resident,
                         "Recurring Concession >$700",
                         f"Recurring concession -${amt:.0f}/mo in {AUDIT_MONTH}. "
-                        f"Single monthly concession exceeds $700 — requires VP approval.",
+                        f"Single monthly concession exceeds $700 â€” requires VP approval.",
                         amt, src))
 
                 elif abs(amt - 500) < 1.0:
                     flags.append(make_flag(prop, unit, resident,
                         "Concession >$500 for 2+ Months",
                         f"Recurring concession is exactly -$500/mo in {AUDIT_MONTH}. "
-                        f"Exact $500 concession requires documentation — verify addendum.",
+                        f"Exact $500 concession requires documentation â€” verify addendum.",
                         amt, src))
 
                 elif months > CONCESSION_HIGH_MONTHS and amt > CONCESSION_HIGH_AMT:
@@ -1397,16 +1416,16 @@ def run_revenue_integrity_engine(
                         "Concession >$500 for 2+ Months",
                         f"-${amt:.0f}/mo concession for {months} month(s) in recurring setup. "
                         f"Recurring concession above ${CONCESSION_HIGH_AMT} for more than "
-                        f"{CONCESSION_HIGH_MONTHS} months — verify lease/addendum.",
+                        f"{CONCESSION_HIGH_MONTHS} months â€” verify lease/addendum.",
                         amt, src))
 
     # =========================================================================
     # STAGE 1B -- NET EFFECTIVE RENT ANALYSIS  (Daniel Twito, June 2026)
     # Uses multi-month projection to detect:
-    #   • Full rent recurring offsets (concession = rent for 2+ months) → CRITICAL
-    #   • Single future-month full offset (one-month-free)             → HIGH / VERIFY
-    #   • Double-discount setup (rent reduced + concession on top)     → CRITICAL
-    #   • Net effective rent below property floor                      → CRITICAL
+    #   â€¢ Full rent recurring offsets (concession = rent for 2+ months) â†’ CRITICAL
+    #   â€¢ Single future-month full offset (one-month-free)             â†’ HIGH / VERIFY
+    #   â€¢ Double-discount setup (rent reduced + concession on top)     â†’ CRITICAL
+    #   â€¢ Net effective rent below property floor                      â†’ CRITICAL
     # =========================================================================
     if df_proj_full is not None and not df_proj_full.empty:
         _conc_kw = {"concession", "conr", "crtco", "empl", "mccr", "rrfee",
@@ -1459,7 +1478,7 @@ def run_revenue_integrity_engine(
             if not active_months:
                 continue
 
-            # ── Full-rent offset: concession = rent → NER ≈ $0 ──────────────
+            # â”€â”€ Full-rent offset: concession = rent â†’ NER â‰ˆ $0 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             full_offset_months = [
                 m for m in active_months
                 if abs(rent_by_m[m] + conc_by_m.get(m, 0)) < 1.0
@@ -1490,13 +1509,13 @@ def run_revenue_integrity_engine(
                 # Distinguish current-month free from a genuinely upcoming free month
                 if m == AUDIT_MONTH:
                     offset_context = (
-                        f"{m} (current audit month — one-month-free concession). "
+                        f"{m} (current audit month â€” one-month-free concession). "
                         f"Verify a signed addendum is on file. "
                         f"If this was an approved move-in special, mark as Reviewed."
                     )
                 else:
                     offset_context = (
-                        f"{m} — one-month-free concession set for an upcoming month. "
+                        f"{m} â€” one-month-free concession set for an upcoming month. "
                         f"Confirm a signed addendum is on file before this month posts. "
                         f"If already approved, mark as Reviewed."
                     )
@@ -1506,13 +1525,13 @@ def run_revenue_integrity_engine(
                     f"{offset_context}",
                     0.0, src))
 
-            # ── NER below floor for current audit month ───────────────────────
+            # â”€â”€ NER below floor for current audit month â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             if (ner_floor is not None
                     and AUDIT_MONTH in rent_by_m
                     and (prop, unit) not in _ner_flagged):
                 rent_a = rent_by_m[AUDIT_MONTH]
                 conc_a = conc_by_m.get(AUDIT_MONTH, 0)
-                ner    = rent_a + conc_a   # conc is negative → correct NER
+                ner    = rent_a + conc_a   # conc is negative â†’ correct NER
                 if rent_a > 0 and 0 < ner < ner_floor:
                     # Proration guard: skip if rent is < 40% of market rent
                     # (partial-month move-in/move-out prorations cause false positives)
@@ -1603,7 +1622,7 @@ def run_revenue_integrity_engine(
                         (today - pd.Timestamp(move_in)).days <= RECENT_MOVEIN_DAYS):
                     flags.append(make_flag(prop, unit, resident,
                         "$0 Net Rent (Recent Move-in)",
-                        f"Net rent $0 — moved in {pd.Timestamp(move_in).date()}, "
+                        f"Net rent $0 â€” moved in {pd.Timestamp(move_in).date()}, "
                         f"within {RECENT_MOVEIN_DAYS} days. "
                         f"Verify first-month timing and that a free-month addendum "
                         f"is on file if applicable.",
@@ -1613,7 +1632,7 @@ def run_revenue_integrity_engine(
                         "$0 Net Rent (Not Recent)",
                         f"Net rent is $0 and resident is not a recent move-in. "
                         f"Check whether this is a courtesy officer, employee, or "
-                        f"model unit — if so, confirm an approved addendum is on file. "
+                        f"model unit â€” if so, confirm an approved addendum is on file. "
                         f"Otherwise investigate for unauthorized full-offset posting.",
                         0.0, src))
 
@@ -1644,7 +1663,7 @@ def run_revenue_integrity_engine(
                 # filter, units that have both a gross rent row and a
                 # "Concession - Rent" credit row on the Rent Roll produce a
                 # net posted_rent that is lower than the gross recurring_rent
-                # in the Projection — a spurious mismatch.
+                # in the Projection â€” a spurious mismatch.
                 rent_rows = grp[
                     grp["Description"].str.lower().str.contains(
                         r"\brent\b|\bbase\b", na=False, regex=True) &
@@ -1653,7 +1672,7 @@ def run_revenue_integrity_engine(
                 posted_rent = rent_rows["Amount"].sum()
 
                 # Exclude concession/credit rows from the rent query so that
-                # recurring_rent reflects the gross rent charge only — matching
+                # recurring_rent reflects the gross rent charge only â€” matching
                 # how posted_rent is calculated from the Rent Roll (which already
                 # excludes concession rows).  Without this exclusion, units with a
                 # "Concession - Rent" entry in the Projection would produce a
@@ -1670,13 +1689,13 @@ def run_revenue_integrity_engine(
                 recurring_rent = proj_sub["Amount"].sum()
 
                 if recurring_rent > 0 and posted_rent > 0:
-                    # Proration guard — bidirectional: skip if EITHER the
+                    # Proration guard â€” bidirectional: skip if EITHER the
                     # projection rent OR the Rent Roll rent is less than 60%
                     # of the other.  This catches two common false-positive
                     # patterns in the audit month column:
-                    #   • New move-in: projection shows a prorated first-month
+                    #   â€¢ New move-in: projection shows a prorated first-month
                     #     amount (small), Rent Roll has full-month gross rent.
-                    #   • Mid-month move-out: Rent Roll shows a prorated final
+                    #   â€¢ Mid-month move-out: Rent Roll shows a prorated final
                     #     charge (small), projection has full-month rent.
                     # Using the SMALLER of the two values vs the LARGER avoids
                     # both directions in a single check.
@@ -1689,7 +1708,7 @@ def run_revenue_integrity_engine(
                         if var > 0:
                             direction_detail = (
                                 f"Recurring projection shows rent of ${recurring_rent:.0f}, "
-                                f"but the Rent Roll has ${posted_rent:.0f} — "
+                                f"but the Rent Roll has ${posted_rent:.0f} â€” "
                                 f"${var:.0f} higher in the projection. "
                                 f"The Rent Roll may reflect a rent reduction not yet "
                                 f"updated in the recurring setup, or vice versa."
@@ -1697,7 +1716,7 @@ def run_revenue_integrity_engine(
                         else:
                             direction_detail = (
                                 f"Recurring projection shows rent of ${recurring_rent:.0f}, "
-                                f"but the Rent Roll has ${posted_rent:.0f} — "
+                                f"but the Rent Roll has ${posted_rent:.0f} â€” "
                                 f"${abs(var):.0f} lower in the projection. "
                                 f"A rent increase may have been applied to the Rent Roll "
                                 f"but the recurring charge was not updated to match."
@@ -1758,7 +1777,7 @@ def run_fee_schedule_check(df_projection: pd.DataFrame) -> pd.DataFrame:
     for prop, prop_grp in df_projection.groupby("Property"):
         schedule = PROPERTY_FEE_SCHEDULE.get(prop)
         if not schedule:
-            print(f"  [SKIP] {prop} — no fee schedule loaded.")
+            print(f"  [SKIP] {prop} â€” no fee schedule loaded.")
             continue
 
         for unit, unit_grp in prop_grp.groupby("Unit"):
@@ -1775,7 +1794,7 @@ def run_fee_schedule_check(df_projection: pd.DataFrame) -> pd.DataFrame:
                 ]
 
                 if matching.empty:
-                    # Charge not present — Missing Standard Charge handles this
+                    # Charge not present â€” Missing Standard Charge handles this
                     continue
 
                 actual_amt = matching["Amount"].iloc[0]
@@ -1987,10 +2006,14 @@ def _format_flag_sheet(ws, status_col_idx: int) -> None:
 
 
 def export_to_excel(johns_flags, daniels_flags, fee_flags,
-                    manager_ranking, override_log, exposure, output_dir) -> str:
-    os.makedirs(output_dir, exist_ok=True)
-    ts       = datetime.now().strftime("%Y%m%d_%H%M")
-    out_path = os.path.join(output_dir, f"LNJ_Audit_{ts}.xlsx")
+                    manager_ranking, override_log, exposure, output_dir=None) -> bytes:
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        out_path = os.path.join(output_dir, f"LNJ_Audit_{ts}.xlsx")
+        write_target = out_path
+    else:
+        write_target = io.BytesIO()
 
     # Add Status/Notes resolution columns to all flag sheets
     j_flags   = _add_review_columns(johns_flags)
@@ -2007,7 +2030,7 @@ def export_to_excel(johns_flags, daniels_flags, fee_flags,
     # --- Track which sheets need flag formatting and where Status col is ---
     flag_sheets = {}   # sheet_name -> status_col_index (1-based)
 
-    with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
+    with pd.ExcelWriter(write_target, engine="openpyxl") as writer:
         if not exposure.get("totals", pd.DataFrame()).empty:
             exposure["totals"].to_excel(writer, sheet_name="Executive Summary", index=False)
 
@@ -2042,9 +2065,19 @@ def export_to_excel(johns_flags, daniels_flags, fee_flags,
         if not override_log.empty:
             override_log.to_excel(writer, sheet_name="Override Detail Log", index=False)
 
+        # openpyxl requires at least one visible sheet
+        if not writer.sheets:
+            pd.DataFrame({"Info": ["No audit data — upload files and run again."]}).to_excel(
+                writer, sheet_name="No Data", index=False
+            )
+
     # --- Post-process with openpyxl for formatting ---
     from openpyxl import load_workbook
-    wb = load_workbook(out_path)
+    if output_dir is not None:
+        wb = load_workbook(out_path)
+    else:
+        write_target.seek(0)
+        wb = load_workbook(write_target)
 
     for sheet_name, status_col in flag_sheets.items():
         if sheet_name in wb.sheetnames:
@@ -2068,36 +2101,56 @@ def export_to_excel(johns_flags, daniels_flags, fee_flags,
                         max_len = max(max_len, min(len(str(val)), 50))
                 ws.column_dimensions[col_letter].width = max(max_len + 2, 10)
 
-    wb.save(out_path)
-    print(f"\n[EXPORT] Saved -> {out_path}")
-    return out_path
+    if output_dir is not None:
+        wb.save(out_path)
+        print(f"\n[EXPORT] Saved -> {out_path}")
+        with open(out_path, "rb") as f:
+            return f.read()
+    else:
+        out_buf = io.BytesIO()
+        wb.save(out_buf)
+        print(f"\n[EXPORT] Excel generated in memory ({ts}).")
+        return out_buf.getvalue()
 
 
 # ===========================================================================
 # SECTION 8 -- MAIN ORCHESTRATOR
 # ===========================================================================
 
-def run_full_audit() -> dict:
+def run_full_audit(uploaded_files=None, audit_month=None) -> dict:
     """
     Single entry point for both CLI and Streamlit app.
-    Returns a dict of all result DataFrames.
+    uploaded_files: dict of {key: [UploadedFile, ...]} for Streamlit upload mode.
+                   When None, reads from data/ subfolders (CLI mode).
+    audit_month:   Override AUDIT_MONTH for the projection loader (e.g. "Jul 2026").
+    Returns a dict of all result DataFrames, plus "excel_bytes" (bytes).
     """
+    _month    = audit_month.strip() if audit_month else AUDIT_MONTH
+    is_upload = uploaded_files is not None
+    uf        = uploaded_files or {}
+
+    # In upload mode: missing keys → empty list (no data for that type).
+    # In CLI mode: pass None → loaders use disk folders.
+    def _uf(key):
+        return uf.get(key) or [] if is_upload else None
+
     print("=" * 60)
     print("  LiveNjoy Residential -- ResMan Audit Bot")
-    print(f"  Audit Month : {AUDIT_MONTH}")
+    print(f"  Audit Month : {_month}")
     print(f"  Run Time    : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 60)
 
     # -- Ingest ---------------------------------------------------------------
-    print("\n[INGEST] Loading files from data/ subfolders ...")
-    df_trans      = load_transaction_list(DIRS["transactions"])
-    df_leases     = load_leases(DIRS["leases"])
-    df_edits      = load_edits(DIRS["edits"])
-    df_projection = load_transaction_projection(DIRS["recurring"], AUDIT_MONTH)
-    df_proj_full  = load_transaction_projection_all_months(DIRS["recurring"])
-    df_rent_roll  = load_rent_roll(DIRS["rent_rolls"])
-    df_activity   = load_resident_activity(DIRS["activity"])
-    mkt_rent_lookup = load_market_rent_schedule(DIRS["market_rent_schedule"])
+    mode_label = "uploaded files" if is_upload else "data/ subfolders"
+    print(f"\n[INGEST] Loading from {mode_label} ...")
+    df_trans      = load_transaction_list(DIRS["transactions"],         uploaded_files=_uf("transactions"))
+    df_leases     = load_leases(DIRS["leases"],                         uploaded_files=_uf("leases"))
+    df_edits      = load_edits(DIRS["edits"],                           uploaded_files=_uf("edits"))
+    df_projection = load_transaction_projection(DIRS["recurring"],      audit_month=_month, uploaded_files=_uf("recurring"))
+    df_proj_full  = load_transaction_projection_all_months(DIRS["recurring"],               uploaded_files=_uf("recurring"))
+    df_rent_roll  = load_rent_roll(DIRS["rent_rolls"],                  uploaded_files=_uf("rent_rolls"))
+    df_activity   = load_resident_activity(DIRS["activity"],            uploaded_files=_uf("activity"))
+    mkt_rent_lookup = load_market_rent_schedule(DIRS["market_rent_schedule"], uploaded_files=_uf("market_rent_schedule"))
 
     print(f"\n  Loaded  : {len(df_trans)} transaction rows | "
           f"{len(df_leases)} lease rows | "
@@ -2130,8 +2183,12 @@ def run_full_audit() -> dict:
               f"{int(t['Critical_Flags'])} CRITICAL")
 
     # -- Export ---------------------------------------------------------------
-    export_to_excel(concession_flags, revenue_integrity_flags, fee_flags, manager_ranking,
-                    override_log, exposure, OUTPUT_DIR)
+    # Upload mode: generate Excel in memory only (no disk write).
+    # CLI mode: write to output/ folder on disk.
+    _out_dir    = None if is_upload else OUTPUT_DIR
+    excel_bytes = export_to_excel(concession_flags, revenue_integrity_flags, fee_flags,
+                                  manager_ranking, override_log, exposure,
+                                  output_dir=_out_dir)
 
     print("\n[DONE] Audit complete.")
     return {
@@ -2148,6 +2205,7 @@ def run_full_audit() -> dict:
         "manager_ranking": manager_ranking,
         "override_log":    override_log,
         "exposure":        exposure,
+        "excel_bytes":     excel_bytes,
     }
 
 
