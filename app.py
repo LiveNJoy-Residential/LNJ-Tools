@@ -1,31 +1,14 @@
 """
-LiveNjoy ResMan Audit — Streamlit Dashboard  (app.py)
-======================================================
-Imports the engine from audit_bot.py and builds an interactive web dashboard.
+LiveNjoy Automation Suite — Tool Hub  (app.py)
+===============================================
+Entry point. Navigates to the Revenue & Concession Audit Tool
+and the Resident Transition Tool.
 
-Tabs
-----
-  1  Executive Summary       — KPIs + exposure totals
-  2  Concession Audit        — John's 9-rule flags
-  3  Revenue Integrity       — Daniel's 2-stage flags
-  4  Manager Overrides       — Ranking + raw edit log
-  5  Exposure Drilldowns     — By property / rule / risk
-  6  Risk Matrix             — Heatmap of severity by property
+Run: .venv\Scripts\streamlit.exe run app.py
 """
 
-from datetime import datetime
-
-import pandas as pd
-import numpy as np
 import streamlit as st
-
-from audit_bot import (
-    run_full_audit,
-    APPROVED_CODES,
-    AUDIT_MONTH,
-    RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM,
-    PROPERTY_FEE_SCHEDULE,
-)
+import streamlit.components.v1 as components
 
 # ─── PAGE CONFIG ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -35,25 +18,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── STYLING ──────────────────────────────────────────────────────────────────
-RISK_COLORS = {
-    RISK_CRITICAL: "#FF4B4B",
-    RISK_HIGH:     "#FFA500",
-    RISK_MEDIUM:   "#FFD700",
-}
-
-def color_risk(val):
-    color = RISK_COLORS.get(val, "#FFFFFF")
-    return f"background-color: {color}; color: black; font-weight: bold;"
-
-def styled_df(df: pd.DataFrame, risk_col: str = "Risk_Level") -> object:
-    if df.empty:
-        return df
-    if risk_col in df.columns:
-        return df.style.map(color_risk, subset=[risk_col])
-    return df
-
-# ─── NAVIGATION STATE ─────────────────────────────────────────────────────────────────────────────
+# ─── NAVIGATION STATE ────────────────────────────────────────────────────────
 if "page" not in st.session_state:
     st.session_state["page"] = "home"
 _page = st.session_state["page"]
@@ -63,23 +28,56 @@ _page = st.session_state["page"]
 if _page == "home":
     st.markdown("""
 <style>
+/* ── Hub colour tokens — light (default) ── */
+:root {
+  --hub-outer:          #0D1B2E;
+  --hub-inner:          #FFFFFF;
+  --hub-border:         #E5E9EF;
+  --hub-txt1:           #1A2744;
+  --hub-txt2:           #6B7280;
+  --hub-txt3:           #374151;
+  --hub-txt-muted:      #9CA3AF;
+  --hub-logo:           #1A2744;
+  --hub-btn-hover:      #243357;
+  --hub-btn-dis-bg:     #F0F0F0;
+  --hub-btn-dis-txt:    #AAAAAA;
+  --hub-btn-dis-bdr:    #E0E0E0;
+}
+/* ── Dark — OS/system preference ── */
+@media (prefers-color-scheme: dark) { :root {
+  --hub-outer:          #060C17;
+  --hub-inner:          #111827;
+  --hub-border:         #1F2D42;
+  --hub-txt1:           #E2E8F0;
+  --hub-txt2:           #94A3B8;
+  --hub-txt3:           #CBD5E1;
+  --hub-txt-muted:      #4B5563;
+  --hub-logo:           #2C4A8A;
+  --hub-btn-hover:      #3A5EA8;
+  --hub-btn-dis-bg:     #1A2438;
+  --hub-btn-dis-txt:    #4B5E78;
+  --hub-btn-dis-bdr:    #1F2D42;
+}}
+/* ── Structural overrides ── */
 [data-testid="stSidebar"]        { display: none !important; }
 [data-testid="collapsedControl"] { display: none !important; }
-.stApp { background-color: #0D1B2E !important; }
+.stApp { background-color: var(--hub-outer) !important; }
 section[data-testid="stMain"] {
     padding: 1.25rem !important;
-    background-color: #0D1B2E !important;
+    background-color: var(--hub-outer) !important;
 }
 .block-container {
-    background: #FFFFFF !important;
+    background: var(--hub-inner) !important;
     border-radius: 16px !important;
     max-width: 100% !important;
     width: 100% !important;
     min-height: calc(100vh - 2.5rem) !important;
-    padding: 2rem 2.5rem 1.5rem !important;
+    padding: 2rem 2.5rem 4rem !important;
     margin: 0 !important;
     box-sizing: border-box !important;
+    position: relative !important;
 }
+/* ── Buttons ── */
 div[data-testid="stButton"] > button {
     border-radius: 8px !important;
     font-size: 0.95rem !important;
@@ -89,22 +87,22 @@ div[data-testid="stButton"] > button {
     border: none !important;
 }
 div[data-testid="stButton"] > button[kind="primary"] {
-    background-color: #1A2744 !important;
+    background-color: var(--hub-logo) !important;
     color: #FFFFFF !important;
 }
 div[data-testid="stButton"] > button[kind="primary"]:hover {
-    background-color: #243357 !important;
+    background-color: var(--hub-btn-hover) !important;
 }
 div[data-testid="stButton"] > button[disabled] {
-    background-color: #F0F0F0 !important;
-    color: #AAAAAA !important;
-    border: 1px solid #E0E0E0 !important;
+    background-color: var(--hub-btn-dis-bg) !important;
+    color: var(--hub-btn-dis-txt) !important;
+    border: 1px solid var(--hub-btn-dis-bdr) !important;
     cursor: not-allowed !important;
 }
 [data-testid="column"] [data-testid="stButton"] {
-    border-left: 1.5px solid #E5E9EF !important;
-    border-right: 1.5px solid #E5E9EF !important;
-    border-bottom: 1.5px solid #E5E9EF !important;
+    border-left: 1.5px solid var(--hub-border) !important;
+    border-right: 1.5px solid var(--hub-border) !important;
+    border-bottom: 1.5px solid var(--hub-border) !important;
     border-radius: 0 0 14px 14px !important;
     overflow: hidden !important;
     margin-top: 0 !important;
@@ -114,582 +112,186 @@ div[data-testid="stButton"] > button[disabled] {
     border-radius: 0 !important;
     margin: 0 !important;
 }
+div[data-testid="stLinkButton"] > a {
+    border-radius: 8px !important;
+    font-size: 0.95rem !important;
+    font-weight: 500 !important;
+    padding: 0.75rem 1rem !important;
+    width: 100% !important;
+    background-color: var(--hub-logo) !important;
+    color: #FFFFFF !important;
+    text-decoration: none !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    border: none !important;
+}
+div[data-testid="stLinkButton"] > a:hover {
+    background-color: var(--hub-btn-hover) !important;
+}
+[data-testid="column"] [data-testid="stLinkButton"] {
+    border-left: 1.5px solid var(--hub-border) !important;
+    border-right: 1.5px solid var(--hub-border) !important;
+    border-bottom: 1.5px solid var(--hub-border) !important;
+    border-radius: 0 0 14px 14px !important;
+    overflow: hidden !important;
+    margin-top: 0 !important;
+    padding: 0 0 0.1rem !important;
+}
+[data-testid="column"] [data-testid="stLinkButton"] > a {
+    border-radius: 0 !important;
+    margin: 0 !important;
+}
+/* ── Status badges ── */
+.hub-badge-active {
+    background:#F0FDF4; color:#16A34A; border:1.5px solid #16A34A;
+    padding:0.2rem 0.65rem; border-radius:20px; font-size:0.68rem;
+    font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
+    white-space:nowrap; flex-shrink:0; margin-left:8px; display:inline-block;
+}
+.hub-badge-dev {
+    background:#FFFBEB; color:#B45309; border:1.5px solid #B45309;
+    padding:0.2rem 0.65rem; border-radius:20px; font-size:0.68rem;
+    font-weight:700; letter-spacing:0.1em; text-transform:uppercase;
+    white-space:nowrap; flex-shrink:0; margin-left:8px; display:inline-block;
+}
+@media (prefers-color-scheme: dark) {
+    .hub-badge-active { background:#052E16; color:#4ADE80; border-color:#4ADE80; }
+    .hub-badge-dev    { background:#1C1400; color:#FBB042; border-color:#FBB042; }
+}
+[data-hub-theme="dark"] .hub-badge-active  { background:#052E16; color:#4ADE80; border-color:#4ADE80; }
+[data-hub-theme="dark"] .hub-badge-dev     { background:#1C1400; color:#FBB042; border-color:#FBB042; }
+[data-hub-theme="light"] .hub-badge-active { background:#F0FDF4; color:#16A34A; border-color:#16A34A; }
+[data-hub-theme="light"] .hub-badge-dev    { background:#FFFBEB; color:#B45309; border-color:#B45309; }
 </style>
 """, unsafe_allow_html=True)
 
     st.markdown("""
 <div style="display:flex;justify-content:space-between;align-items:center;padding:0.25rem 0 1.25rem;">
 <div style="display:flex;align-items:center;gap:12px;">
-<div style="width:44px;height:44px;background:#1A2744;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+<div style="width:44px;height:44px;background:var(--hub-logo);border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
 <span style="color:#FFFFFF;font-size:1.1rem;font-weight:900;letter-spacing:-0.03em;">LJ</span>
 </div>
 <div>
-<div style="font-size:0.95rem;font-weight:700;color:#1A2744;letter-spacing:0.01em;line-height:1.3;">LiveNJoy Automation Suite</div>
-<div style="font-size:0.68rem;color:#9CA3AF;letter-spacing:0.14em;text-transform:uppercase;line-height:1;">Enterprise Operations Hub</div>
+<div style="font-size:0.95rem;font-weight:700;color:var(--hub-txt1);letter-spacing:0.01em;line-height:1.3;">LiveNJoy Automation Suite</div>
+<div style="font-size:0.68rem;color:var(--hub-txt-muted);letter-spacing:0.14em;text-transform:uppercase;line-height:1;">Enterprise Operations Hub</div>
 </div>
 </div>
 <div style="display:flex;align-items:center;gap:8px;">
 <span style="width:10px;height:10px;background:#22C55E;border-radius:50%;display:inline-block;flex-shrink:0;"></span>
 <div style="text-align:right;line-height:1.4;">
-<div style="font-size:0.75rem;font-weight:700;color:#1A2744;letter-spacing:0.1em;text-transform:uppercase;">Connected</div>
-<div style="font-size:0.67rem;color:#9CA3AF;letter-spacing:0.1em;text-transform:uppercase;">ResMan Environment</div>
+<div style="font-size:0.75rem;font-weight:700;color:var(--hub-txt1);letter-spacing:0.1em;text-transform:uppercase;">Connected</div>
+<div style="font-size:0.67rem;color:var(--hub-txt-muted);letter-spacing:0.1em;text-transform:uppercase;">ResMan Environment</div>
 </div>
 </div>
 </div>
-<hr style="border:none;border-top:1px solid #E5E9EF;margin:0 0 1.5rem;">
+<hr style="border:none;border-top:1px solid var(--hub-border);margin:0 0 1.5rem;">
 """, unsafe_allow_html=True)
 
     col1, col2 = st.columns(2, gap="medium")
 
     with col1:
         st.markdown("""
-<div style="border:1.5px solid #E5E9EF;border-bottom:none;border-radius:14px 14px 0 0;padding:1.5rem 1.5rem 1.25rem;background:#FFFFFF;margin-bottom:0;">
+<div style="border:1.5px solid var(--hub-border);border-bottom:none;border-radius:14px 14px 0 0;padding:1.5rem 1.5rem 1.25rem;background:var(--hub-inner);margin-bottom:0;">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.9rem;">
 <div style="display:flex;align-items:center;gap:12px;">
-<div style="width:44px;height:44px;background:#1A2744;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+<div style="width:44px;height:44px;background:var(--hub-logo);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
 <span style="color:#FFFFFF;font-size:1.25rem;font-weight:700;">$</span>
 </div>
-<div style="font-size:1.12rem;font-weight:700;color:#1A2744;line-height:1.35;">Revenue &amp; Concession<br>Audit Tool</div>
+<div style="font-size:1.12rem;font-weight:700;color:var(--hub-txt1);line-height:1.35;">Revenue &amp; Concession<br>Audit Tool</div>
 </div>
-<span style="background:#FFFFFF;color:#16A34A;border:1.5px solid #16A34A;padding:0.2rem 0.65rem;border-radius:20px;font-size:0.68rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;margin-left:8px;">Active</span>
+<span class="hub-badge-active">Active</span>
 </div>
-<p style="color:#6B7280;font-size:0.85rem;margin:0 0 0.85rem;line-height:1.4;">ResMan Revenue Integrity &amp; Exception Analytics</p>
-<ul style="margin:0;padding-left:1.1rem;color:#374151;font-size:0.84rem;line-height:2.0;list-style-type:disc;">
+<p style="color:var(--hub-txt2);font-size:0.85rem;margin:0 0 0.85rem;line-height:1.4;">ResMan Revenue Integrity &amp; Exception Analytics</p>
+<ul style="margin:0;padding-left:1.1rem;color:var(--hub-txt3);font-size:0.84rem;line-height:2.0;list-style-type:disc;">
 <li>Automated Across 7 ResMan CSV Reports</li>
 <li>Exposure Mapping (Critical, High, Medium Severity Flags)</li>
 <li>Automated Excel Report Generation</li>
 </ul>
 </div>
 """, unsafe_allow_html=True)
-        if st.button("Run Audit Engine  \u2192", key="go_audit", type="primary", width="stretch"):
-            st.session_state["page"] = "audit"
-            st.rerun()
+        if st.button("Open Audit Tool  \u2192", key="go_audit", type="primary", width="stretch"):
+            st.switch_page("pages/1_Audit_Tool.py")
 
     with col2:
         st.markdown("""
-<div style="border:1.5px solid #E5E9EF;border-bottom:none;border-radius:14px 14px 0 0;padding:1.5rem 1.5rem 1.25rem;background:#FFFFFF;margin-bottom:0;">
+<div style="border:1.5px solid var(--hub-border);border-bottom:none;border-radius:14px 14px 0 0;padding:1.5rem 1.5rem 1.25rem;background:var(--hub-inner);margin-bottom:0;">
 <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.9rem;">
 <div style="display:flex;align-items:center;gap:12px;">
-<div style="width:44px;height:44px;background:#1A2744;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+<div style="width:44px;height:44px;background:var(--hub-logo);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
 <span style="color:#FFFFFF;font-size:1.25rem;font-weight:700;">&#x21C4;</span>
 </div>
-<div style="font-size:1.12rem;font-weight:700;color:#1A2744;line-height:1.35;">Resident<br>Transition Tool</div>
+<div style="font-size:1.12rem;font-weight:700;color:var(--hub-txt1);line-height:1.35;">Resident<br>Transition Tool</div>
 </div>
-<span style="background:#FFFFFF;color:#B45309;border:1.5px solid #B45309;padding:0.2rem 0.65rem;border-radius:20px;font-size:0.68rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;white-space:nowrap;flex-shrink:0;margin-left:8px;">In Development</span>
+<span class="hub-badge-dev">Under Development</span>
 </div>
-<p style="color:#6B7280;font-size:0.85rem;margin:0 0 0.85rem;line-height:1.4;">Move-In &amp; Move-Out Workflow Automation</p>
-<ul style="margin:0;padding-left:1.1rem;color:#374151;font-size:0.84rem;line-height:2.0;list-style-type:disc;">
+<p style="color:var(--hub-txt2);font-size:0.85rem;margin:0 0 0.85rem;line-height:1.4;">Move-In &amp; Move-Out Workflow Automation</p>
+<ul style="margin:0;padding-left:1.1rem;color:var(--hub-txt3);font-size:0.84rem;line-height:2.0;list-style-type:disc;">
 <li>Lease Addendum Verification &amp; Unit Inspection Checks</li>
 <li>Resident Onboarding Checklist &amp; Ledger Reconciliation</li>
 <li>Streamlined Deposit Refund &amp; Unit Turn Tracking</li>
 </ul>
 </div>
 """, unsafe_allow_html=True)
-        st.button("Under Development", key="go_resident", disabled=True, width="stretch")
+        if st.button("Open Transition Tool  \u2192", key="go_resident", type="primary", width="stretch"):
+            st.switch_page("pages/2_Resident_Transitions.py")
 
     st.markdown("""
-<div style="display:flex;justify-content:space-between;align-items:center;padding:1.25rem 0 0.25rem;margin-top:0.75rem;border-top:1px solid #E5E9EF;">
-<span style="font-size:0.67rem;color:#9CA3AF;letter-spacing:0.1em;text-transform:uppercase;">LiveNJoy Residential LLC &copy; &middot; 2026 &middot; Internal Use Only</span>
-<span style="font-size:0.67rem;color:#9CA3AF;letter-spacing:0.1em;text-transform:uppercase;">System Status &middot; <span style="color:#22C55E;font-weight:700;">Operational</span></span>
+<div style="position:fixed;bottom:1.25rem;left:1.25rem;right:1.25rem;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--hub-border);padding:0.9rem 2.5rem 0;background:var(--hub-inner);z-index:999;">
+<span style="font-size:0.67rem;color:var(--hub-txt-muted);letter-spacing:0.1em;text-transform:uppercase;">LiveNJoy Residential LLC &copy; &middot; 2026 &middot; Internal Use Only</span>
+<span style="font-size:0.67rem;color:var(--hub-txt-muted);letter-spacing:0.1em;text-transform:uppercase;">System Status &middot; <span style="color:#22C55E;font-weight:700;">Operational</span></span>
 </div>
 """, unsafe_allow_html=True)
 
+    # ── Theme sync: reads Streamlit's actual theme and applies CSS vars as
+    #    inline styles on <html> — inline styles beat any stylesheet rule.
+    components.html("""
+<script>
+(function() {
+    var doc = window.parent.document;
+    var root = doc.documentElement;
+    var LIGHT = {
+        '--hub-outer':'#0D1B2E','--hub-inner':'#FFFFFF',
+        '--hub-border':'#E5E9EF','--hub-txt1':'#1A2744',
+        '--hub-txt2':'#6B7280','--hub-txt3':'#374151',
+        '--hub-txt-muted':'#9CA3AF','--hub-logo':'#1A2744',
+        '--hub-btn-hover':'#243357','--hub-btn-dis-bg':'#F0F0F0',
+        '--hub-btn-dis-txt':'#AAAAAA','--hub-btn-dis-bdr':'#E0E0E0'
+    };
+    var DARK = {
+        '--hub-outer':'#060C17','--hub-inner':'#111827',
+        '--hub-border':'#1F2D42','--hub-txt1':'#E2E8F0',
+        '--hub-txt2':'#94A3B8','--hub-txt3':'#CBD5E1',
+        '--hub-txt-muted':'#4B5563','--hub-logo':'#2C4A8A',
+        '--hub-btn-hover':'#3A5EA8','--hub-btn-dis-bg':'#1A2438',
+        '--hub-btn-dis-txt':'#4B5E78','--hub-btn-dis-bdr':'#1F2D42'
+    };
+    function getTheme() {
+        // Priority 1 – Streamlit's data-theme attribute (v1.36+)
+        var attr = root.getAttribute('data-theme');
+        if (attr === 'light' || attr === 'dark') return attr;
+        // Priority 2 – Streamlit's injected --background-color CSS variable
+        var bg = window.parent.getComputedStyle(root)
+            .getPropertyValue('--background-color').trim().toLowerCase();
+        if (bg === '#ffffff' || bg === 'white' || bg === 'rgb(255, 255, 255)') return 'light';
+        if (bg) return 'dark';
+        // Priority 3 – OS preference
+        return window.parent.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    function apply() {
+        var theme = getTheme();
+        var tokens = theme === 'light' ? LIGHT : DARK;
+        for (var k in tokens) root.style.setProperty(k, tokens[k]);
+        root.setAttribute('data-hub-theme', theme);
+    }
+    apply();
+    // Watch for Streamlit theme changes
+    new MutationObserver(apply).observe(root, {
+        attributes: true, attributeFilter: ['data-theme', 'class']
+    });
+    setInterval(apply, 500);
+})();
+</script>
+""", height=0, scrolling=False)
+
     st.stop()
-
-
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    if st.button("← Hub", key="back_to_hub", help="Return to LiveNJoy Tools"):
-        st.session_state["page"] = "home"
-        st.rerun()
-    st.divider()
-    st.image("https://img.icons8.com/fluency/96/property.png", width=60)
-    st.title("LiveNjoy Audit Bot")
-    st.markdown("**Version:** 2.1  \n**Engine:** John + Daniel Rules")
-    st.divider()
-
-    audit_month_input = st.text_input(
-        "Audit Month",
-        value=AUDIT_MONTH,
-        help="Format: Mon YYYY — e.g. Jul 2026",
-    )
-
-    st.divider()
-    st.markdown("#### 📂 Upload ResMan Exports")
-    st.caption(
-        "Upload CSV files for one or more properties. "
-        "Only properties with uploaded files will be audited."
-    )
-
-    up_transactions = st.file_uploader(
-        "Transaction List Reports",
-        type="csv", accept_multiple_files=True,
-        help="Credits section — must come from a full-access ResMan account",
-    )
-    up_leases = st.file_uploader(
-        "New & Renewed Leases",
-        type="csv", accept_multiple_files=True,
-    )
-    up_edits = st.file_uploader(
-        "Edited Transactions by User",
-        type="csv", accept_multiple_files=True,
-    )
-    up_recurring = st.file_uploader(
-        "Transaction Projections (Recurring)",
-        type="csv", accept_multiple_files=True,
-    )
-    up_rent_rolls = st.file_uploader(
-        "Rent Rolls",
-        type="csv", accept_multiple_files=True,
-    )
-    up_activity = st.file_uploader(
-        "Resident Activity",
-        type="csv", accept_multiple_files=True,
-    )
-    up_market_rent = st.file_uploader(
-        "Market Rent Schedule",
-        type="csv", accept_multiple_files=True,
-    )
-
-    total_files = sum(len(x or []) for x in [
-        up_transactions, up_leases, up_edits,
-        up_recurring, up_rent_rolls, up_activity, up_market_rent,
-    ])
-
-    st.divider()
-    run_btn = st.button(
-        f"🚀  Run Audit  ({total_files} file{'s' if total_files != 1 else ''} ready)" if total_files
-        else "🚀  Run Audit",
-        type="primary",
-        width='stretch',
-        disabled=(total_files == 0),
-    )
-
-    if st.session_state.get("excel_bytes"):
-        ts_label = st.session_state.get("run_ts", datetime.now().strftime("%Y%m%d_%H%M"))
-        st.download_button(
-            label="📥  Download Excel Report",
-            data=st.session_state["excel_bytes"],
-            file_name=f"LNJ_Audit_{ts_label}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            width='stretch',
-        )
-
-
-# ─── HEADER ───────────────────────────────────────────────────────────────────
-st.title("📊 LiveNjoy — Master Audit Dashboard")
-st.markdown(
-    "Automated **Concession Audit** (John's Rules: Post-Term, Missing Addendum, Amount Mismatch, Not Properly Posted, Large Credit, Non-Standard Description) + "
-    "**Recurring Revenue Integrity Audit** (Daniel's 2-Stage Engine)"
-)
-st.divider()
-
-
-# ─── RUN ENGINE ───────────────────────────────────────────────────────────────
-if run_btn:
-    uploaded_files = {
-        "transactions":         up_transactions  or [],
-        "leases":               up_leases        or [],
-        "edits":                up_edits         or [],
-        "recurring":            up_recurring     or [],
-        "rent_rolls":           up_rent_rolls    or [],
-        "activity":             up_activity      or [],
-        "market_rent_schedule": up_market_rent   or [],
-    }
-    with st.spinner("Ingesting CSVs and running audit engines…"):
-        try:
-            results = run_full_audit(
-                uploaded_files=uploaded_files,
-                audit_month=audit_month_input.strip() or None,
-            )
-            st.session_state["results"]     = results
-            st.session_state["excel_bytes"] = results.get("excel_bytes")
-            st.session_state["run_ts"]      = datetime.now().strftime("%Y%m%d_%H%M")
-            st.success("✅  Audit complete — use the **Download Excel Report** button in the sidebar.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"❌  Engine error: {exc}")
-            st.stop()
-
-if "results" not in st.session_state:
-    st.info("👈  Upload your ResMan CSV exports in the sidebar, then click **Run Audit** to begin.")
-    st.stop()
-
-# Unpack results
-R               = st.session_state["results"]
-concession_flags     = R["concession_flags"]
-revenue_integrity_flags   = R["revenue_integrity_flags"]
-fee_flags       = R.get("fee_flags", pd.DataFrame())
-all_flags       = R["all_flags"]
-manager_ranking = R["manager_ranking"]
-override_log    = R["override_log"]
-exposure        = R["exposure"]
-
-totals          = exposure.get("totals", pd.DataFrame())
-by_prop         = exposure.get("by_property", pd.DataFrame())
-by_rule         = exposure.get("by_rule", pd.DataFrame())
-by_risk         = exposure.get("by_risk", pd.DataFrame())
-
-
-# ─── TABS ─────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📈 Executive Summary",
-    "🔍 Concession Audit Engine",
-    "⚙️  Revenue Integrity Engine",
-    "👤 Manager Overrides",
-    "💰 Exposure Drilldowns",
-    "🗂️  Risk Matrix",
-    "📋 Fee Schedule Check",
-])
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — EXECUTIVE SUMMARY
-# ══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.header("Portfolio Health Snapshot")
-
-    if totals.empty:
-        st.warning("No audit data available.")
-    else:
-        row = totals.iloc[0]
-
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Units Audited",        int(row.get("Total_Units_Audited", 0)))
-        c2.metric("Total Exceptions",     int(row.get("Total_Exceptions", 0)))
-        c3.metric("Financial Exposure",   f"${row.get('Deduped_Exposure', row.get('Total_Exposure', 0)):,.2f}")
-        c4.metric("Avg Flags / Unit",     f"{row.get('Avg_Flags_Per_Unit', 0):.1f}")
-        c5.metric("Critical Flags",       int(row.get("Critical_Flags", 0)))
-        st.caption(
-            f"Financial Exposure shows the conservative deduped figure "
-            f"(max impact per unit across all engines: "
-            f"**${row.get('Deduped_Exposure', row.get('Total_Exposure', 0)):,.2f}**). "
-            f"Raw sum across all flags: **${row.get('Total_Exposure', 0):,.2f}**."
-        )
-
-        st.divider()
-        st.subheader("Flags by Risk Level")
-        rc1, rc2, rc3 = st.columns(3)
-        rc1.metric("🔴 CRITICAL", int(row.get("Critical_Flags", 0)))
-        rc2.metric("🟠 HIGH",     int(row.get("High_Flags", 0)))
-        rc3.metric("🟡 MEDIUM",   int(row.get("Medium_Flags", 0)))
-
-    st.divider()
-    st.subheader("All Exceptions")
-    if not all_flags.empty:
-        # Filters
-        cols = st.columns(3)
-        with cols[0]:
-            risk_filter = st.multiselect("Filter by Risk",
-                [RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM],
-                default=[RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM])
-        with cols[1]:
-            prop_options = ["All"] + sorted(all_flags["Property"].dropna().unique().tolist())
-            prop_filter = st.selectbox("Filter by Property", prop_options)
-        with cols[2]:
-            rule_options = ["All"] + sorted(all_flags["Rule"].dropna().unique().tolist())
-            rule_filter = st.selectbox("Filter by Rule", rule_options)
-
-        view = all_flags[all_flags["Risk_Level"].isin(risk_filter)]
-        if prop_filter != "All":
-            view = view[view["Property"] == prop_filter]
-        if rule_filter != "All":
-            view = view[view["Rule"] == rule_filter]
-
-        st.dataframe(styled_df(view), width='stretch', hide_index=True)
-        st.caption(f"{len(view):,} records shown")
-    else:
-        st.success("No exceptions found — clean portfolio!")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — CONCESSION AUDIT ENGINE
-# ══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    st.header("Concession Audit Engine")
-    st.markdown(
-        "Validates every concession/credit posting against the "
-        "approved codes (`CONR`, `CRTCO`, `EMPL`, `MCCR`, `RRFee`) "
-        "and the legal lease document."
-    )
-
-    if concession_flags.empty:
-        st.success("✅  No concession violations detected.")
-    else:
-        # Summary by rule
-        rule_summary = (
-            concession_flags.groupby(["Rule", "Risk_Level"])
-            .agg(Count=("Rule", "count"), Exposure=("Amount_Impact", "sum"))
-            .reset_index()
-            .sort_values("Exposure", ascending=False)
-        )
-        st.subheader("Rule Summary")
-        st.dataframe(styled_df(rule_summary), width='stretch', hide_index=True)
-
-        st.divider()
-        st.subheader("Unit-Level Flags")
-        st.dataframe(styled_df(concession_flags), width='stretch', hide_index=True)
-        st.caption(
-            f"Concession Audit Engine exposure (raw sum): **${concession_flags['Amount_Impact'].sum():,.2f}**. "
-            "Note: some units may also appear in the Revenue Integrity Engine — the Executive Summary "
-            "deduplicates by taking the max impact per unit."
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — REVENUE INTEGRITY ENGINE AUDIT
-# ══════════════════════════════════════════════════════════════════════════════
-with tab3:
-    st.header("Revenue Integrity Engine — 2-Stage Audit")
-
-    s1_tab, s2_tab = st.tabs(["Stage 1 — Recurring Projection", "Stage 2 — Posted Rent Roll"])
-
-    # Stage 1 flags (identified by rules from that stage)
-    stage1_rules = {
-        "Missing Standard Charge", "Major Charge Amount Variance",
-        "Minor Charge Amount Variance", "Recurring Concession >$700",
-        "Concession >$500 for 2+ Months", "Concession No Expiration",
-        "Post-Term Credit",
-    }
-    stage2_rules = {
-        "Negative Net Rent", "$0 Net Rent (Recent Move-in)", "$0 Net Rent (Not Recent)",
-        "Manual Posting Without Setup", "Invalid Credit Code",
-        "Posted vs Recurring Mismatch", "Misc Tenant Credit",
-    }
-
-    stage1_flags = revenue_integrity_flags[revenue_integrity_flags["Rule"].isin(stage1_rules)] if not revenue_integrity_flags.empty else pd.DataFrame()
-    stage2_flags = revenue_integrity_flags[revenue_integrity_flags["Rule"].isin(stage2_rules)] if not revenue_integrity_flags.empty else pd.DataFrame()
-
-    with s1_tab:
-        st.subheader("What should post every month vs what is configured")
-        if stage1_flags.empty:
-            st.success("✅  No recurring projection issues found.")
-        else:
-            st.markdown(f"**{len(stage1_flags)} flags** — Total Exposure: **${stage1_flags['Amount_Impact'].sum():,.2f}**")
-
-            # 90% rule violations
-            missing_charges = stage1_flags[stage1_flags["Rule"] == "Missing Standard Charge"]
-            if not missing_charges.empty:
-                st.markdown("#### Missing Standard Charges (90% Rule)")
-                st.dataframe(missing_charges, width='stretch', hide_index=True)
-
-            # Amount variance
-            variances = stage1_flags[stage1_flags["Rule"].str.contains("Variance")]
-            if not variances.empty:
-                st.markdown("#### Charge Amount Inconsistencies")
-                st.dataframe(styled_df(variances), width='stretch', hide_index=True)
-
-            # Concession red flags
-            conc_flags = stage1_flags[stage1_flags["Rule"].str.contains("Concession|concession")]
-            if not conc_flags.empty:
-                st.markdown("#### Concession Red Flags")
-                st.dataframe(styled_df(conc_flags), width='stretch', hide_index=True)
-
-    with s2_tab:
-        st.subheader("What managers actually posted this month")
-        if stage2_flags.empty:
-            st.success("✅  No posted rent roll issues found.")
-        else:
-            st.markdown(f"**{len(stage2_flags)} flags** — Total Exposure: **${stage2_flags['Amount_Impact'].sum():,.2f}**")
-
-            # Net rent integrity
-            net_flags = stage2_flags[stage2_flags["Rule"].str.contains("Net Rent")]
-            if not net_flags.empty:
-                st.markdown("#### Net Rent Integrity Issues")
-                st.dataframe(styled_df(net_flags), width='stretch', hide_index=True)
-
-            # Manual concessions
-            manual_flags = stage2_flags[stage2_flags["Rule"].isin(
-                {"Manual Posting Without Setup", "Invalid Credit Code"}
-            )]
-            if not manual_flags.empty:
-                st.markdown("#### Manual Concession / Invalid Code")
-                st.dataframe(styled_df(manual_flags), width='stretch', hide_index=True)
-
-            # Mismatch + misc
-            other = stage2_flags[~stage2_flags["Rule"].isin(
-                net_flags["Rule"].tolist() + manual_flags["Rule"].tolist()
-            )]
-            if not other.empty:
-                st.markdown("#### Other Posted Flags")
-                st.dataframe(styled_df(other), width='stretch', hide_index=True)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — MANAGER OVERRIDES
-# ══════════════════════════════════════════════════════════════════════════════
-with tab4:
-    st.header("Manager Override Analysis")
-    st.markdown(
-        "Tracks every manual ledger edit from the **Edited Transactions** report. "
-        "Ranks managers by total revenue impact of their overrides."
-    )
-
-    left, right = st.columns([1, 2])
-
-    with left:
-        st.subheader("📋 Manager Leaderboard")
-        if manager_ranking.empty:
-            st.success("No manual overrides detected.")
-        else:
-            st.dataframe(manager_ranking, width='stretch', hide_index=True)
-            worst = manager_ranking.iloc[0]
-            st.warning(
-                f"⚠️ Highest impact: **{worst['Manager_Login']}** "
-                f"at **{worst['Property']}** — "
-                f"${worst['Total_Impact']:,.2f} across "
-                f"{int(worst['Total_Events'])} events"
-            )
-
-    with right:
-        st.subheader("📝 Raw Override Log")
-        if override_log.empty:
-            st.info("No override detail available.")
-        else:
-            # Filter by manager
-            managers = ["All"] + sorted(override_log["Manager_Login"].unique().tolist())
-            selected_mgr = st.selectbox("Filter by Manager", managers)
-            view = override_log if selected_mgr == "All" else override_log[override_log["Manager_Login"] == selected_mgr]
-            st.dataframe(view, width='stretch', hide_index=True)
-            if not view.empty:
-                st.caption(f"Revenue impact shown: **${view['Revenue_Impact'].sum():,.2f}**")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 5 — EXPOSURE DRILLDOWNS
-# ══════════════════════════════════════════════════════════════════════════════
-with tab5:
-    st.header("Financial Exposure Drilldowns")
-
-    d1, d2, d3 = st.columns(3)
-
-    with d1:
-        st.subheader("By Property")
-        if not by_prop.empty:
-            st.dataframe(by_prop, width='stretch', hide_index=True)
-        else:
-            st.info("No property data.")
-
-    with d2:
-        st.subheader("By Rule / Charge Type")
-        if not by_rule.empty:
-            st.dataframe(by_rule, width='stretch', hide_index=True)
-        else:
-            st.info("No rule data.")
-
-    with d3:
-        st.subheader("By Risk Level")
-        if not by_risk.empty:
-            st.dataframe(styled_df(by_risk, "Risk_Level"), width='stretch', hide_index=True)
-        else:
-            st.info("No risk data.")
-
-    st.divider()
-    st.subheader("Exposure by Manager (from Override Log)")
-    if not override_log.empty:
-        mgr_exposure = (
-            override_log.groupby(["Property", "Manager_Login"])["Revenue_Impact"]
-            .agg(Edits="count", Total_Impact="sum")
-            .reset_index()
-            .sort_values("Total_Impact", ascending=True)
-        )
-        st.dataframe(mgr_exposure, width='stretch', hide_index=True)
-    else:
-        st.info("No manager exposure data (no edited transactions loaded).")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — RISK MATRIX
-# ══════════════════════════════════════════════════════════════════════════════
-with tab6:
-    st.header("Risk Matrix — Severity by Property")
-
-    if all_flags.empty:
-        st.success("No flags — nothing to display.")
-    else:
-        pivot = (
-            all_flags.groupby(["Property", "Risk_Level"])
-            .agg(Count=("Rule", "count"), Exposure=("Amount_Impact", "sum"))
-            .reset_index()
-            .pivot_table(index="Property",
-                         columns="Risk_Level",
-                         values=["Count", "Exposure"],
-                         fill_value=0)
-        )
-        pivot.columns = [f"{v}_{c}" for v, c in pivot.columns]
-        pivot = pivot.reset_index()
-        st.dataframe(pivot, width='stretch')
-
-        st.divider()
-        st.subheader("Resident-Level Drilldown")
-        props = sorted(all_flags["Property"].dropna().unique().tolist())
-        selected_prop = st.selectbox("Select Property", ["All"] + props)
-        drilldown = all_flags if selected_prop == "All" else all_flags[all_flags["Property"] == selected_prop]
-        drilldown_sorted = drilldown.sort_values(
-            ["Risk_Level", "Amount_Impact"],
-            key=lambda col: col.map({RISK_CRITICAL: 0, RISK_HIGH: 1, RISK_MEDIUM: 2}) if col.name == "Risk_Level" else col,
-            ascending=[True, False]
-        )
-        st.dataframe(styled_df(drilldown_sorted), width='stretch', hide_index=True)
-        st.caption(
-            f"{len(drilldown_sorted):,} exceptions | "
-            f"Exposure: **${drilldown_sorted['Amount_Impact'].sum():,.2f}**"
-        )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 7 — FEE SCHEDULE CHECK
-# ══════════════════════════════════════════════════════════════════════════════
-with tab7:
-    st.header("Fee Schedule Violations")
-    st.markdown(
-        "Compares each unit's **Recurring Transaction Projection** against the "
-        "official fee sheet amounts provided by Daniel Twito. "
-        "Flags any charge that differs from the fee schedule by **≥ $1**. "
-        "\n\n> **La Prada** is excluded — no fee sheet provided. "
-        "**Parking, pet fees, and washer/dryer** are marked optional and only "
-        "flagged when the charge exists with the wrong amount."
-    )
-
-    if fee_flags.empty:
-        st.success("✅  All recurring charges match the official fee schedule.")
-    else:
-        # Summary by property
-        summary = (
-            fee_flags.groupby(["Property"])
-            .agg(Units=("Unit", "nunique"), Flags=("Rule", "count"),
-                 Total_Variance=("Amount_Impact", "sum"))
-            .reset_index()
-            .sort_values("Total_Variance", ascending=False)
-        )
-        st.subheader("Summary by Property")
-        st.dataframe(summary, width='stretch', hide_index=True)
-
-        st.divider()
-
-        # Filter by property
-        props_fs = ["All"] + sorted(fee_flags["Property"].dropna().unique().tolist())
-        sel_prop = st.selectbox("Filter by Property", props_fs, key="fee_prop_filter")
-        view_fee = fee_flags if sel_prop == "All" else fee_flags[fee_flags["Property"] == sel_prop]
-
-        st.subheader(f"Unit-Level Detail ({len(view_fee)} flags)")
-        st.dataframe(styled_df(view_fee), width='stretch', hide_index=True)
-        st.caption(f"Total variance exposure: **${view_fee['Amount_Impact'].sum():,.2f}**")
-
-        st.divider()
-        st.subheader("Official Fee Schedule Reference")
-        fee_rows = []
-        for prop_name, fees in PROPERTY_FEE_SCHEDULE.items():
-            for f in fees:
-                fee_rows.append({
-                    "Property":   prop_name,
-                    "Fee Name":   f["name"],
-                    "Expected $": f"${f['amount']:.2f}",
-                    "Optional":   "Yes" if f["optional"] else "No",
-                })
-        st.dataframe(pd.DataFrame(fee_rows), width='stretch', hide_index=True)
-
-
-# ─── FOOTER ───────────────────────────────────────────────────────────────────
-st.divider()
-st.caption("LiveNjoy Residential · ResMan Audit Bot · Built per John B. & Daniel Twito specifications")

@@ -51,7 +51,7 @@ warnings.filterwarnings("ignore")
 # ---------------------------------------------------------------------------
 # GLOBAL PATHS
 # ---------------------------------------------------------------------------
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR   = os.path.join(BASE_DIR, "data")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
@@ -2006,8 +2006,11 @@ def _format_flag_sheet(ws, status_col_idx: int) -> None:
 
 
 def export_to_excel(johns_flags, daniels_flags, fee_flags,
-                    manager_ranking, override_log, exposure, output_dir=None) -> bytes:
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
+                    manager_ranking, override_log, exposure,
+                    output_dir=None, audit_month="") -> bytes:
+    month_slug = audit_month.replace(" ", "") if audit_month else ""
+    ts_suffix  = datetime.now().strftime("%Y%m%d_%H%M")
+    ts = f"{month_slug}_{ts_suffix}" if month_slug else ts_suffix
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"LNJ_Audit_{ts}.xlsx")
@@ -2188,7 +2191,7 @@ def run_full_audit(uploaded_files=None, audit_month=None) -> dict:
     _out_dir    = None if is_upload else OUTPUT_DIR
     excel_bytes = export_to_excel(concession_flags, revenue_integrity_flags, fee_flags,
                                   manager_ranking, override_log, exposure,
-                                  output_dir=_out_dir)
+                                  output_dir=_out_dir, audit_month=_month)
 
     print("\n[DONE] Audit complete.")
     return {
