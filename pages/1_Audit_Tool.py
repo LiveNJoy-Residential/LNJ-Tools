@@ -62,6 +62,18 @@ def _norm(name: str) -> str:
 def _valid(files, keyword: str) -> bool:
     return bool(files) and all(keyword in _norm(f.name) for f in files)
 
+def derive_file_type(filename: str) -> str | None:
+    """Route a ResMan CSV filename to its data category."""
+    n = _norm(filename)
+    if "marketrent" in n:            return "market_rent_schedule"
+    if "editedtransactions" in n:    return "edits"
+    if "recurringtransaction" in n:  return "recurring"
+    if "transactionlist" in n:       return "transactions"
+    if "rentroll" in n:              return "rent_rolls"
+    if "newandrenewed" in n:         return "leases"
+    if "residentactivity" in n:      return "activity"
+    return None
+
 # ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("""
@@ -103,38 +115,54 @@ section[data-testid="stSidebar"] [data-testid="stFileUploader"] {
     st.divider()
     with st.expander("📂 Upload ResMan CSVs", expanded=False):
         st.caption(
-            "Upload CSV files for one or more properties. "
-            "Only properties with uploaded files will be audited."
+            "Drop all ResMan CSV exports here — files are auto-detected by filename. "
+            "Upload any mix of properties and report types."
         )
-        up_transactions = st.file_uploader(
-            "Transaction Lists",
-            type="csv", accept_multiple_files=True,
-            help="Credits section — must come from a full-access ResMan account",
+        _raw_uploads = st.file_uploader(
+            "ResMan CSV Exports",
+            type="csv",
+            accept_multiple_files=True,
+            help="Transaction Lists · Leases · Rent Rolls · Recurring Projections · Edited Transactions · Resident Activity · Market Rent Schedule",
         )
-        up_leases = st.file_uploader(
-            "New & Renewed Leases",
-            type="csv", accept_multiple_files=True,
-        )
-        up_edits = st.file_uploader(
-            "Edited Transactions by User",
-            type="csv", accept_multiple_files=True,
-        )
-        up_recurring = st.file_uploader(
-            "Recurring Transaction Projections",
-            type="csv", accept_multiple_files=True,
-        )
-        up_rent_rolls = st.file_uploader(
-            "Rent Rolls",
-            type="csv", accept_multiple_files=True,
-        )
-        up_activity = st.file_uploader(
-            "Resident Activity",
-            type="csv", accept_multiple_files=True,
-        )
-        up_market_rent = st.file_uploader(
-            "Market Rent Schedule Details",
-            type="csv", accept_multiple_files=True,
-        )
+
+        # ── Route each file to its bucket by filename ──────────────────────
+        up_transactions, up_leases, up_edits   = [], [], []
+        up_recurring, up_rent_rolls, up_activity, up_market_rent = [], [], [], []
+        _unrecognized = []
+        _seen = set()
+        for _f in (_raw_uploads or []):
+            if _f.name in _seen:
+                continue
+            _seen.add(_f.name)
+            _ftype = derive_file_type(_f.name)
+            if   _ftype == "transactions":        up_transactions.append(_f)
+            elif _ftype == "leases":              up_leases.append(_f)
+            elif _ftype == "edits":               up_edits.append(_f)
+            elif _ftype == "recurring":           up_recurring.append(_f)
+            elif _ftype == "rent_rolls":          up_rent_rolls.append(_f)
+            elif _ftype == "activity":            up_activity.append(_f)
+            elif _ftype == "market_rent_schedule": up_market_rent.append(_f)
+            else:                                 _unrecognized.append(_f.name)
+
+        # ── Detection summary ───────────────────────────────────────────────
+        if _raw_uploads:
+            _cats = [
+                ("Transaction Lists",  up_transactions),
+                ("Leases",             up_leases),
+                ("Rent Rolls",         up_rent_rolls),
+                ("Recurring",          up_recurring),
+                ("Edits",              up_edits),
+                ("Activity",           up_activity),
+                ("Market Rent",        up_market_rent),
+            ]
+            st.markdown(
+                "  \n".join(
+                    f"{'✅' if b else '❌'} **{lbl}** ({len(b)})"
+                    for lbl, b in _cats
+                )
+            )
+            if _unrecognized:
+                st.warning(f"⚠️ {len(_unrecognized)} unrecognized file(s) — check filenames: {', '.join(_unrecognized)}")
 
     # ── Auto-detect audit month from uploaded Transaction List ──────────────────────
     if up_transactions:
