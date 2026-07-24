@@ -221,7 +221,7 @@ div[data-testid="stLinkButton"] > a:hover {
 <div style="width:44px;height:44px;background:var(--hub-logo);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
 <span style="color:#FFFFFF;font-size:1.25rem;font-weight:700;">&#x21C4;</span>
 </div>
-<div style="font-size:1.12rem;font-weight:700;color:var(--hub-txt1);line-height:1.35;">Resident<br>Transition Tool</div>
+<div style="font-size:1.12rem;font-weight:700;color:var(--hub-txt1);line-height:1.35;">Resident<br>Activity Audit Tool</div>
 </div>
 <span class="hub-badge-dev">Under Development</span>
 </div>

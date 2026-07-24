@@ -34,7 +34,7 @@ st.markdown("""
 <div style="width:48px;height:48px;background:#1A2744;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
 <span style="color:#FFFFFF;font-size:1.4rem;font-weight:700;">&#x21C4;</span>
 </div>
-<h1 style="margin:0;padding:0;font-size:2rem;font-weight:700;line-height:1.2;">Resident Transition Audit Tool</h1>
+<h1 style="margin:0;padding:0;font-size:2rem;font-weight:700;line-height:1.2;">Resident Activity Audit Tool</h1>
 </div>
 """, unsafe_allow_html=True)
 st.markdown("Automated **Move-In Audit** + **Move-Out Audit**")
