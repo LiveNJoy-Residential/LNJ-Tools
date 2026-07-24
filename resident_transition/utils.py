@@ -1,5 +1,5 @@
 """
-Shared utility helpers for the Resident Transition Tool.
+Shared utility helpers for the Resident Activity Audit Tool.
 Standalone — no dependency on audit_bot.py.
 """
 

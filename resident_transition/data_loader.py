@@ -1,5 +1,5 @@
 """
-CSV loaders for the three ResMan exports used by the Resident Transition Tool:
+CSV loaders for the three ResMan exports used by the Resident Activity Audit Tool:
   1. New & Renewed Leases
   2. Resident Activity
   3. Rent Roll  (returns two DataFrames: unit-level and charge-level)

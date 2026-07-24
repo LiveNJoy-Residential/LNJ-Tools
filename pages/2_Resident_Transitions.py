@@ -1,5 +1,5 @@
 """
-Resident Transition Tool — Streamlit Dashboard
+Resident Activity Audit Tool — Streamlit Dashboard
 LiveNjoy Residential | Move-In & Move-Out Audit | Phase 1
 
 Run: .venv\Scripts\streamlit.exe run resident_transition/transition_app.py

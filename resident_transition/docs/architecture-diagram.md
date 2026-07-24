@@ -1,8 +1,8 @@
-# Resident Transition Tool — Architecture Diagram
+# Resident Activity Audit Tool — Architecture Diagram
 
 **Prepared for:** Partha Balakrishnan / Development Team  
 **Date:** July 23, 2026  
-**Project:** LNJ Resident Transition Tool (Move-In & Move-Out Audit)
+**Project:** LNJ Resident Activity Audit Tool (Move-In & Move-Out Audit)
 
 ---
 
@@ -17,7 +17,7 @@ flowchart TD
         R6["Document Attachment Report — Phase 2 needed"]
     end
 
-    subgraph Tool["Resident Transition Tool — Python / Streamlit"]
+    subgraph Tool["Resident Activity Audit Tool — Python / Streamlit"]
         I["Data Ingestion Layer — CSV Import + Field Validation"]
 
         subgraph MoveIn["Move-In Audit Engine"]

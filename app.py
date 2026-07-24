@@ -2,7 +2,7 @@
 LiveNjoy Automation Suite — Tool Hub  (app.py)
 ===============================================
 Entry point. Navigates to the Revenue & Concession Audit Tool
-and the Resident Transition Tool.
+and the Resident Activity Audit Tool.
 
 Run: .venv\Scripts\streamlit.exe run app.py
 """
