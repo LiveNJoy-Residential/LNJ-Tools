@@ -21,7 +21,7 @@ from move_out_engine import run_move_out_audit
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="LNJ Resident Transitions",
+    page_title="LNJ Resident Activity Audit",
     page_icon="🏠",
     layout="wide",
 )
