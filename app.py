@@ -233,7 +233,7 @@ div[data-testid="stLinkButton"] > a:hover {
 </ul>
 </div>
 """, unsafe_allow_html=True)
-        if st.button("Open Transition Tool  \u2192", key="go_resident", type="primary", width="stretch"):
+        if st.button("Open Audit Tool  \u2192", key="go_resident", type="primary", width="stretch"):
             st.switch_page("pages/2_Resident_Transitions.py")
 
     st.markdown("""
