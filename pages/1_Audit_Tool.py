@@ -455,79 +455,113 @@ with tab2:
 # TAB 3 — REVENUE INTEGRITY ENGINE AUDIT
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
-    st.header("Revenue Integrity Engine — 2-Stage Audit")
+    st.header("Revenue Integrity Report")
+    st.caption("Formatted per-property report — Critical items, High-priority items, and Verify-only items.")
 
-    s1_tab, s2_tab = st.tabs(["Stage 1 — Recurring Projection", "Stage 2 — Posted Rent Roll"])
+    if all_flags.empty:
+        st.success("✅  No exceptions found.")
+    else:
+        # ── Property filter ──────────────────────────────────────────────────
+        props_available = ["All Properties"] + sorted(all_flags["Property"].dropna().unique().tolist())
+        sel_prop = st.selectbox("Property", props_available, key="rev_prop_sel")
+        view = all_flags if sel_prop == "All Properties" else all_flags[all_flags["Property"] == sel_prop]
 
-    # Stage 1 flags (identified by rules from that stage)
-    stage1_rules = {
-        "Missing Standard Charge", "Major Charge Amount Variance",
-        "Minor Charge Amount Variance", "Recurring Concession >$700",
-        "Concession >$500 for 2+ Months", "Concession No Expiration",
-        "Post-Term Credit",
-    }
-    stage2_rules = {
-        "Negative Net Rent", "$0 Net Rent (Recent Move-in)", "$0 Net Rent (Not Recent)",
-        "Manual Posting Without Setup", "Invalid Credit Code",
-        "Posted vs Recurring Mismatch", "Misc Tenant Credit",
-    }
-
-    stage1_flags = revenue_integrity_flags[revenue_integrity_flags["Rule"].isin(stage1_rules)] if not revenue_integrity_flags.empty else pd.DataFrame()
-    stage2_flags = revenue_integrity_flags[revenue_integrity_flags["Rule"].isin(stage2_rules)] if not revenue_integrity_flags.empty else pd.DataFrame()
-
-    with s1_tab:
-        st.subheader("What should post every month vs what is configured")
-        if stage1_flags.empty:
-            st.success("✅  No recurring projection issues found.")
+        if view.empty:
+            st.success(f"✅  No flags for {sel_prop}.")
         else:
-            st.markdown(f"**{len(stage1_flags)} flags** — Total Exposure: **${stage1_flags['Amount_Impact'].sum():,.2f}**")
+            n_c = int((view["Risk_Level"] == RISK_CRITICAL).sum())
+            n_h = int((view["Risk_Level"] == RISK_HIGH).sum())
+            n_v = int((view["Risk_Level"] == RISK_VERIFY).sum())
+            n_m = int((view["Risk_Level"] == RISK_MEDIUM).sum())
+            st.markdown(
+                f"**{len(view)} total flags** — "
+                f"🔴 {n_c} Critical &nbsp;·&nbsp; 🟠 {n_h} High &nbsp;·&nbsp; "
+                f"🟢 {n_v} Verify &nbsp;·&nbsp; 🟡 {n_m} Medium"
+            )
+            st.divider()
 
-            # 90% rule violations
-            missing_charges = stage1_flags[stage1_flags["Rule"] == "Missing Standard Charge"]
-            if not missing_charges.empty:
-                st.markdown("#### Missing Standard Charges (90% Rule)")
-                st.dataframe(missing_charges, width='stretch', hide_index=True)
+            prop_label_fn = lambda row: f"**{row['Property']}** · " if sel_prop == "All Properties" else ""
 
-            # Amount variance
-            variances = stage1_flags[stage1_flags["Rule"].str.contains("Variance")]
-            if not variances.empty:
-                st.markdown("#### Charge Amount Inconsistencies")
-                st.dataframe(styled_df(variances), width='stretch', hide_index=True)
+            # ── 🔴 CRITICAL ──────────────────────────────────────────────────
+            crit = view[view["Risk_Level"] == RISK_CRITICAL].sort_values(["Property", "Unit"])
+            if not crit.empty:
+                st.markdown("### 🔴 CRITICAL — Needs immediate correction")
+                for _, row in crit.iterrows():
+                    st.markdown(
+                        f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
+                        f"{row['Detail']}"
+                    )
+                st.divider()
 
-            # Concession red flags
-            conc_flags = stage1_flags[stage1_flags["Rule"].str.contains("Concession|concession")]
-            if not conc_flags.empty:
-                st.markdown("#### Concession Red Flags")
-                st.dataframe(styled_df(conc_flags), width='stretch', hide_index=True)
+            # ── 🟠 HIGH ──────────────────────────────────────────────────────
+            high_df = view[view["Risk_Level"] == RISK_HIGH].sort_values(["Property", "Unit"])
+            if not high_df.empty:
+                st.markdown("### 🟠 HIGH — Needs review")
 
-    with s2_tab:
-        st.subheader("What managers actually posted this month")
-        if stage2_flags.empty:
-            st.success("✅  No posted rent roll issues found.")
-        else:
-            st.markdown(f"**{len(stage2_flags)} flags** — Total Exposure: **${stage2_flags['Amount_Impact'].sum():,.2f}**")
+                # Group Missing Standard Charges by unit to avoid per-charge noise
+                missing = high_df[high_df["Rule"] == "Missing Standard Charge"]
+                other_high = high_df[high_df["Rule"] != "Missing Standard Charge"]
 
-            # Net rent integrity
-            net_flags = stage2_flags[stage2_flags["Rule"].str.contains("Net Rent")]
-            if not net_flags.empty:
-                st.markdown("#### Net Rent Integrity Issues")
-                st.dataframe(styled_df(net_flags), width='stretch', hide_index=True)
+                # Non-missing flags first
+                for _, row in other_high.iterrows():
+                    st.markdown(
+                        f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
+                        f"{row['Detail']} *({row['Rule']})*"
+                    )
 
-            # Manual concessions
-            manual_flags = stage2_flags[stage2_flags["Rule"].isin(
-                {"Manual Posting Without Setup", "Invalid Credit Code"}
-            )]
-            if not manual_flags.empty:
-                st.markdown("#### Manual Concession / Invalid Code")
-                st.dataframe(styled_df(manual_flags), width='stretch', hide_index=True)
+                # Missing charges: grouped per unit
+                if not missing.empty:
+                    from collections import defaultdict
+                    unit_charges = defaultdict(lambda: {"res": "", "prop": "", "charges": []})
+                    for _, row in missing.iterrows():
+                        key = (row["Property"], row["Unit"])
+                        unit_charges[key]["res"]  = row["Resident"]
+                        unit_charges[key]["prop"] = row["Property"]
+                        # Extract charge name from detail  e.g. "'Billing Fee' is standard..."
+                        try:
+                            charge_name = row["Detail"].split("'")[1]
+                        except IndexError:
+                            charge_name = row["Rule"]
+                        unit_charges[key]["charges"].append(charge_name)
 
-            # Mismatch + misc
-            other = stage2_flags[~stage2_flags["Rule"].isin(
-                net_flags["Rule"].tolist() + manual_flags["Rule"].tolist()
-            )]
-            if not other.empty:
-                st.markdown("#### Other Posted Flags")
-                st.dataframe(styled_df(other), width='stretch', hide_index=True)
+                    st.markdown("**Missing Standard Charges (units with no recurring setup):**")
+                    for (prop, unit), info in sorted(unit_charges.items()):
+                        charge_list = ", ".join(sorted(set(info["charges"])))
+                        plabel = f"**{prop}** · " if sel_prop == "All Properties" else ""
+                        st.markdown(f"  - {plabel}**Unit {unit}** — {info['res']}: Missing {charge_list}")
+                st.divider()
+
+            # ── 🟢 VERIFY ────────────────────────────────────────────────────
+            ver = view[view["Risk_Level"] == RISK_VERIFY].sort_values(["Property", "Unit"])
+            if not ver.empty:
+                st.markdown("### 🟢 VERIFY — Confirm addendum is on file")
+                for _, row in ver.iterrows():
+                    st.markdown(
+                        f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
+                        f"{row['Detail']}"
+                    )
+                st.divider()
+
+            # ── 🟡 MEDIUM ────────────────────────────────────────────────────
+            med = view[view["Risk_Level"] == RISK_MEDIUM].sort_values(["Property", "Unit"])
+            if not med.empty:
+                with st.expander(f"🟡 MEDIUM — {len(med)} flags (previously corrected items / minor)"):
+                    for _, row in med.iterrows():
+                        st.markdown(
+                            f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
+                            f"{row['Detail']} *({row['Rule']})*"
+                        )
+
+            # ── Raw data table (hidden by default) ──────────────────────────
+            with st.expander("📊 View / Download raw data"):
+                st.dataframe(
+                    styled_df(view.sort_values(["Risk_Level", "Property", "Unit"])),
+                    width="stretch", hide_index=True
+                )
+                csv_bytes = view.to_csv(index=False).encode("utf-8")
+                fname = f"flags_{sel_prop.replace(' ', '_')}.csv"
+                st.download_button("⬇  Download CSV", data=csv_bytes,
+                                   file_name=fname, mime="text/csv")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
