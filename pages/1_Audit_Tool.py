@@ -455,113 +455,40 @@ with tab2:
 # TAB 3 — REVENUE INTEGRITY ENGINE AUDIT
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
-    st.header("Revenue Integrity Report")
-    st.caption("Formatted per-property report — Critical items, High-priority items, and Verify-only items.")
+    st.header("Revenue Integrity Engine")
 
     if all_flags.empty:
         st.success("✅  No exceptions found.")
     else:
-        # ── Property filter ──────────────────────────────────────────────────
-        props_available = ["All Properties"] + sorted(all_flags["Property"].dropna().unique().tolist())
-        sel_prop = st.selectbox("Property", props_available, key="rev_prop_sel")
-        view = all_flags if sel_prop == "All Properties" else all_flags[all_flags["Property"] == sel_prop]
+        cols = st.columns(3)
+        with cols[0]:
+            risk_filter3 = st.multiselect("Filter by Risk",
+                [RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM, RISK_VERIFY],
+                default=[RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM, RISK_VERIFY],
+                key="rev3_risk")
+        with cols[1]:
+            prop_opts3 = ["All"] + sorted(all_flags["Property"].dropna().unique().tolist())
+            prop_filter3 = st.selectbox("Filter by Property", prop_opts3, key="rev3_prop")
+        with cols[2]:
+            rule_opts3 = ["All"] + sorted(all_flags["Rule"].dropna().unique().tolist())
+            rule_filter3 = st.selectbox("Filter by Rule", rule_opts3, key="rev3_rule")
 
-        if view.empty:
-            st.success(f"✅  No flags for {sel_prop}.")
-        else:
-            n_c = int((view["Risk_Level"] == RISK_CRITICAL).sum())
-            n_h = int((view["Risk_Level"] == RISK_HIGH).sum())
-            n_v = int((view["Risk_Level"] == RISK_VERIFY).sum())
-            n_m = int((view["Risk_Level"] == RISK_MEDIUM).sum())
-            st.markdown(
-                f"**{len(view)} total flags** — "
-                f"🔴 {n_c} Critical &nbsp;·&nbsp; 🟠 {n_h} High &nbsp;·&nbsp; "
-                f"🟢 {n_v} Verify &nbsp;·&nbsp; 🟡 {n_m} Medium"
-            )
-            st.divider()
+        view3 = all_flags[all_flags["Risk_Level"].isin(risk_filter3)]
+        if prop_filter3 != "All":
+            view3 = view3[view3["Property"] == prop_filter3]
+        if rule_filter3 != "All":
+            view3 = view3[view3["Rule"] == rule_filter3]
 
-            prop_label_fn = lambda row: f"**{row['Property']}** · " if sel_prop == "All Properties" else ""
+        view3 = view3.sort_values(["Risk_Level", "Property", "Unit"],
+            key=lambda col: col.map({RISK_CRITICAL: 0, RISK_HIGH: 1, RISK_MEDIUM: 2, RISK_VERIFY: 3})
+            if col.name == "Risk_Level" else col)
 
-            # ── 🔴 CRITICAL ──────────────────────────────────────────────────
-            crit = view[view["Risk_Level"] == RISK_CRITICAL].sort_values(["Property", "Unit"])
-            if not crit.empty:
-                st.markdown("### 🔴 CRITICAL — Needs immediate correction")
-                for _, row in crit.iterrows():
-                    st.markdown(
-                        f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
-                        f"{row['Detail']}"
-                    )
-                st.divider()
+        st.dataframe(styled_df(view3), width="stretch", hide_index=True)
+        st.caption(f"{len(view3):,} records shown")
 
-            # ── 🟠 HIGH ──────────────────────────────────────────────────────
-            high_df = view[view["Risk_Level"] == RISK_HIGH].sort_values(["Property", "Unit"])
-            if not high_df.empty:
-                st.markdown("### 🟠 HIGH — Needs review")
-
-                # Group Missing Standard Charges by unit to avoid per-charge noise
-                missing = high_df[high_df["Rule"] == "Missing Standard Charge"]
-                other_high = high_df[high_df["Rule"] != "Missing Standard Charge"]
-
-                # Non-missing flags first
-                for _, row in other_high.iterrows():
-                    st.markdown(
-                        f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
-                        f"{row['Detail']} *({row['Rule']})*"
-                    )
-
-                # Missing charges: grouped per unit
-                if not missing.empty:
-                    from collections import defaultdict
-                    unit_charges = defaultdict(lambda: {"res": "", "prop": "", "charges": []})
-                    for _, row in missing.iterrows():
-                        key = (row["Property"], row["Unit"])
-                        unit_charges[key]["res"]  = row["Resident"]
-                        unit_charges[key]["prop"] = row["Property"]
-                        # Extract charge name from detail  e.g. "'Billing Fee' is standard..."
-                        try:
-                            charge_name = row["Detail"].split("'")[1]
-                        except IndexError:
-                            charge_name = row["Rule"]
-                        unit_charges[key]["charges"].append(charge_name)
-
-                    st.markdown("**Missing Standard Charges (units with no recurring setup):**")
-                    for (prop, unit), info in sorted(unit_charges.items()):
-                        charge_list = ", ".join(sorted(set(info["charges"])))
-                        plabel = f"**{prop}** · " if sel_prop == "All Properties" else ""
-                        st.markdown(f"  - {plabel}**Unit {unit}** — {info['res']}: Missing {charge_list}")
-                st.divider()
-
-            # ── 🟢 VERIFY ────────────────────────────────────────────────────
-            ver = view[view["Risk_Level"] == RISK_VERIFY].sort_values(["Property", "Unit"])
-            if not ver.empty:
-                st.markdown("### 🟢 VERIFY — Confirm addendum is on file")
-                for _, row in ver.iterrows():
-                    st.markdown(
-                        f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
-                        f"{row['Detail']}"
-                    )
-                st.divider()
-
-            # ── 🟡 MEDIUM ────────────────────────────────────────────────────
-            med = view[view["Risk_Level"] == RISK_MEDIUM].sort_values(["Property", "Unit"])
-            if not med.empty:
-                with st.expander(f"🟡 MEDIUM — {len(med)} flags (previously corrected items / minor)"):
-                    for _, row in med.iterrows():
-                        st.markdown(
-                            f"- {prop_label_fn(row)}**Unit {row['Unit']}** — {row['Resident']}: "
-                            f"{row['Detail']} *({row['Rule']})*"
-                        )
-
-            # ── Raw data table (hidden by default) ──────────────────────────
-            with st.expander("📊 View / Download raw data"):
-                st.dataframe(
-                    styled_df(view.sort_values(["Risk_Level", "Property", "Unit"])),
-                    width="stretch", hide_index=True
-                )
-                csv_bytes = view.to_csv(index=False).encode("utf-8")
-                fname = f"flags_{sel_prop.replace(' ', '_')}.csv"
-                st.download_button("⬇  Download CSV", data=csv_bytes,
-                                   file_name=fname, mime="text/csv")
+        csv_bytes = view3.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇  Download CSV", data=csv_bytes,
+                           file_name="revenue_integrity_flags.csv", mime="text/csv")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
