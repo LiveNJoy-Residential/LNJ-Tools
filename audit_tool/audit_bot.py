@@ -1939,6 +1939,91 @@ def run_manager_override_audit(df_edits: pd.DataFrame) -> tuple:
 
 
 # ===========================================================================
+# SECTION 5B -- VERIFIED BASELINE SUPPRESSION
+# ===========================================================================
+
+def load_verified_baseline() -> pd.DataFrame:
+    """Load data/verified_baseline.csv — the accumulated list of flags that
+    have been confirmed as 'Verified' (intentional setup) or 'Corrected'
+    (fix was applied) by Daniel Twito and property managers.
+
+    Columns: Property, Unit, Rule, Status, Resident, Notes, Month_Verified
+    Status values:
+      Verified      — intentional setup per approved lease/addendum; suppress.
+      Corrected     — fix was applied; keep flag but downgrade + prefix detail.
+      Keep_Flagging — known issue, never resolved; always emit at full severity.
+    """
+    path = os.path.join(DATA_DIR, "verified_baseline.csv")
+    if not os.path.exists(path):
+        print("  [BASELINE] verified_baseline.csv not found — no suppression applied.")
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(path, dtype=str).fillna("")
+        df["Unit"] = df["Unit"].apply(clean_unit)
+        print(f"  [BASELINE] Loaded {len(df)} verified/corrected items.")
+        return df
+    except Exception as e:
+        print(f"  [BASELINE] Could not load verified_baseline.csv: {e}")
+        return pd.DataFrame()
+
+
+def apply_verified_baseline(flags_df: pd.DataFrame,
+                             baseline_df: pd.DataFrame) -> pd.DataFrame:
+    """Apply verified-baseline suppression to a flags DataFrame.
+
+    Verified     → flag removed from output entirely.
+    Corrected    → flag kept but Risk_Level downgraded to MEDIUM and Detail
+                   prefixed with '[Previously Corrected <month> — confirm
+                   correction still in effect]'.
+    Keep_Flagging → no change; flag emitted at full severity.
+    """
+    if flags_df is None or flags_df.empty:
+        return flags_df if flags_df is not None else pd.DataFrame()
+    if baseline_df is None or baseline_df.empty:
+        return flags_df
+
+    kept = []
+    suppressed = 0
+    downgraded = 0
+
+    for _, row in flags_df.iterrows():
+        match = baseline_df[
+            (baseline_df["Property"] == row["Property"]) &
+            (baseline_df["Unit"]     == str(row["Unit"])) &
+            (baseline_df["Rule"]     == row["Rule"])
+        ]
+        if match.empty:
+            kept.append(row)
+            continue
+
+        status = match.iloc[0]["Status"]
+        month  = match.iloc[0].get("Month_Verified", "prior month")
+
+        if status == "Verified":
+            suppressed += 1
+            continue  # suppress completely
+        elif status == "Corrected":
+            modified = row.copy()
+            modified["Detail"]     = (
+                f"[Previously Corrected {month} \u2014 confirm correction "
+                f"still in effect] " + str(row["Detail"])
+            )
+            modified["Risk_Level"] = RISK_MEDIUM
+            kept.append(modified)
+            downgraded += 1
+        else:
+            kept.append(row)  # Keep_Flagging or unknown
+
+    if suppressed or downgraded:
+        print(f"  [BASELINE] Suppressed {suppressed} Verified flags | "
+              f"Downgraded {downgraded} Corrected flags to MEDIUM.")
+
+    if not kept:
+        return pd.DataFrame(columns=flags_df.columns)
+    return pd.DataFrame(kept, columns=flags_df.columns).reset_index(drop=True)
+
+
+# ===========================================================================
 # SECTION 6 -- FINANCIAL EXPOSURE CALCULATOR
 # ===========================================================================
 
@@ -2252,6 +2337,12 @@ def run_full_audit(uploaded_files=None, audit_month=None) -> dict:
     )
     fee_flags     = run_fee_schedule_check(df_projection)
     manager_ranking, override_log = run_manager_override_audit(df_edits)
+
+    # -- Apply verified baseline suppression ----------------------------------
+    _baseline               = load_verified_baseline()
+    concession_flags        = apply_verified_baseline(concession_flags, _baseline)
+    revenue_integrity_flags = apply_verified_baseline(revenue_integrity_flags, _baseline)
+    fee_flags               = apply_verified_baseline(fee_flags, _baseline)
 
     # -- Combine + exposure ---------------------------------------------------
     all_flags = (pd.concat([concession_flags, revenue_integrity_flags, fee_flags], ignore_index=True)
