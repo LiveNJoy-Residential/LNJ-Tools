@@ -100,7 +100,7 @@ OPTIONAL_CHARGE_KEYWORDS = {
 PROPERTY_NER_FLOORS = {
     "Parks on Taylor":     {"1BR": 799, "2BR": 899},
     "Highland Park":       {"1BR": 799, "2BR": 999},
-    "Valencia Plaza":      {"1BR": 999, "2BR": None},
+    "Valencia Plaza":      {"1BR": 999, "2BR": 999},
     "Western Station":     {"1BR": None, "2BR": None},   # floor varies by floorplan
     "Village Green":       {"1BR": None, "2BR": None},   # $300 off market â€” see PROPERTY_NER_DISCOUNT
     "Crossings at Irving": {"1BR": None, "2BR": None},   # $100 off market â€” see PROPERTY_NER_DISCOUNT
@@ -130,7 +130,7 @@ PROPERTY_FEE_SCHEDULE = {
         {"name": "Trash Service",        "keywords": ["trash service"],                     "amount": 10.00, "optional": False},
         {"name": "Pest Control",         "keywords": ["pest control"],                      "amount": 8.00,  "optional": False},
         {"name": "Package Locker",       "keywords": ["package locker"],                    "amount": 9.00,  "optional": False},
-        {"name": "Cable/Internet",       "keywords": ["cable", "internet"],                 "amount": 55.00, "optional": False},
+        {"name": "Cable/Internet (Spectrum)",  "keywords": ["cable", "internet", "spectrum"],  "amount": 55.00, "optional": False},
         {"name": "First Floor Fee",      "keywords": ["first floor", "1st floor"],          "amount": 25.00, "optional": True},
         {"name": "Washer/Dryer Rental",  "keywords": ["washer", "dryer"],                   "amount": 55.00, "optional": True},
         {"name": "Reserved Parking",     "keywords": ["carport", "parking"],                "amount": 35.00, "optional": True},
@@ -201,6 +201,7 @@ PROPERTY_FEE_SCHEDULE = {
 RISK_CRITICAL = "CRITICAL"
 RISK_HIGH     = "HIGH"
 RISK_MEDIUM   = "MEDIUM"
+RISK_VERIFY   = "VERIFY"
 
 RISK_MAP = {
     # John's Rules
@@ -231,7 +232,11 @@ RISK_MAP = {
     "Full Rent Recurring Offset":     RISK_CRITICAL,   # concession = rent for 2+ months
     "Net Effective Rent Below Floor": RISK_CRITICAL,   # NER below property floor
     "Double-Discount Setup":          RISK_CRITICAL,   # rent reduced + concession on top
-    "Future Month Full Offset":       RISK_HIGH,       # single future month full offset
+    "Future Month Full Offset":       RISK_VERIFY,     # single-month free — verify addendum
+    "Exact $500 Concession":          RISK_HIGH,       # unusual amount — may be first/last month split
+    "NTV Proration":                  RISK_VERIFY,     # prorated rent for NTV unit
+    "Recurring Rent Decrease":        RISK_HIGH,       # material drop not tied to NTV/move-out
+    "Recurring Rent Decrease (NTV)":  RISK_VERIFY,     # rent drop likely due to NTV/move-out proration
 }
 
 
@@ -322,6 +327,28 @@ def get_bedroom_type(unit_type: str) -> str:
         return "3BR"
     prefix = clean[0] if clean else ""
     return {"A": "1BR", "B": "2BR", "C": "3BR", "D": "3BR"}.get(prefix, "Unknown")
+
+
+def get_wst_ner_floor(unit_type: str, market_rent: float):
+    """Compute NER floor for Western Station based on floor plan and market rent.
+    Per Daniel Twito: A1/A1U/A2U = $150 off market, other 1BR = $200 off,
+    2BR = $300 off, 3BR = $200 off.
+    """
+    if not market_rent or market_rent <= 0:
+        return None
+    clean = unit_type.strip().upper()
+    base  = re.split(r'[-\s]', clean)[0] if clean else ""
+    if base in ("A1", "A1U", "A2U"):
+        discount = 150
+    elif clean.startswith("A"):
+        discount = 200   # other 1BR
+    elif clean.startswith("B"):
+        discount = 300   # 2BR
+    elif clean.startswith(("C", "D")):
+        discount = 200   # 3BR
+    else:
+        return None
+    return max(market_rent - discount, 0)
 
 
 def make_flag(property_name: str, unit: str, resident: str,
@@ -1406,9 +1433,10 @@ def run_revenue_integrity_engine(
 
                 elif abs(amt - 500) < 1.0:
                     flags.append(make_flag(prop, unit, resident,
-                        "Concession >$500 for 2+ Months",
-                        f"Recurring concession is exactly -$500/mo in {AUDIT_MONTH}. "
-                        f"Exact $500 concession requires documentation â€” verify addendum.",
+                        "Exact $500 Concession",
+                        f"Recurring concession exactly -$500/mo. "
+                        f"May be $500 first full month / $500 last month split. "
+                        f"Verify concession addendum is on file.",
                         amt, src))
 
                 elif months > CONCESSION_HIGH_MONTHS and amt > CONCESSION_HIGH_AMT:
@@ -1448,6 +1476,12 @@ def run_revenue_integrity_engine(
 
         # Track units already flagged for NER so we don't emit both
         # Double-Discount and NER-Below-Floor for the same unit.
+        # Build rent-roll status lookup for NTV detection in rent decrease audit
+        rr_status_lookup = {}
+        if df_rent_roll is not None and not df_rent_roll.empty:
+            for (p, u), grp in df_rent_roll.groupby(["Property", "Unit"]):
+                rr_status_lookup[(p, u)] = grp["Status"].iloc[0]
+
         _ner_flagged = set()
 
         for (prop, unit), ug in pf.groupby(["Property", "Unit"]):
@@ -1466,6 +1500,12 @@ def run_revenue_integrity_engine(
                     sched_mkt = market_rent_lookup.get((prop, unit))
                     if sched_mkt and sched_mkt > 0:
                         ner_floor = sched_mkt - discount
+
+            # Western Station: floor plan-specific discount from market rent
+            if ner_floor is None and prop == "Western Station" and market_rent_lookup:
+                sched_mkt = market_rent_lookup.get((prop, unit))
+                if sched_mkt and sched_mkt > 0:
+                    ner_floor = get_wst_ner_floor(unit_type, sched_mkt)
 
             rent_by_m = {}
             conc_by_m = {}
@@ -1495,10 +1535,8 @@ def run_revenue_integrity_engine(
                     "Full Rent Recurring Offset",
                     f"Rent ${rent_a:.0f} / Concession -${abs(conc_a):.0f} / Net $0 \u2014 "
                     f"{span} ({len(full_offset_months)} months). "
-                    f"Potential revenue loss: ${total_exposure:,.0f}. "
-                    f"If a one-month-free special was intended, the recurring setup "
-                    f"must be corrected to a single month only. "
-                    f"Action required: have property manager correct future concession setup immediately.",
+                    f"Revenue exposure: ${total_exposure:,.0f}. "
+                    f"If a one-month-free special was intended, recurring setup must be corrected to one month only.",
                     rent_a, src))
                 _ner_flagged.add((prop, unit))
 
@@ -1509,15 +1547,13 @@ def run_revenue_integrity_engine(
                 # Distinguish current-month free from a genuinely upcoming free month
                 if m == AUDIT_MONTH:
                     offset_context = (
-                        f"{m} (current audit month â€” one-month-free concession). "
-                        f"Verify a signed addendum is on file. "
-                        f"If this was an approved move-in special, mark as Reviewed."
+                        f"{m} (current audit month). "
+                        f"One-month-free concession — verify signed addendum is on file."
                     )
                 else:
                     offset_context = (
-                        f"{m} â€” one-month-free concession set for an upcoming month. "
-                        f"Confirm a signed addendum is on file before this month posts. "
-                        f"If already approved, mark as Reviewed."
+                        f"{m} — one-month-free concession for upcoming month. "
+                        f"Confirm signed addendum is on file before this month posts."
                     )
                 flags.append(make_flag(prop, unit, resident,
                     "Future Month Full Offset",
@@ -1557,10 +1593,8 @@ def run_revenue_integrity_engine(
                             f"Net ${ner:.0f}. "
                             f"Rent is already below market AND a concession is "
                             f"applied on top \u2014 double-discount. "
-                            f"{br_type} minimum NER floor: ${ner_floor:.0f}. "
-                            f"Action required: obtain VP authorization for this "
-                            f"setup, or correct the recurring charges so NER is "
-                            f"at or above ${ner_floor:.0f}/mo.",
+                            f"{br_type} NER floor: ${ner_floor:.0f}. "
+                            f"Obtain VP authorization or correct so NER \u2265 ${ner_floor:.0f}.",
                             ner_floor - ner, src))
                     else:
                         flags.append(make_flag(prop, unit, resident,
@@ -1572,6 +1606,31 @@ def run_revenue_integrity_engine(
                             ner_floor - ner, src))
                     _ner_flagged.add((prop, unit))
 
+            # ── Rent Decrease Audit ──────────────────────────────────────────
+            # Flag material recurring rent decreases from the prior month.
+            # Classifies NTV units as VERIFY, all others as HIGH.
+            if AUDIT_MONTH in all_months_sorted:
+                audit_idx = all_months_sorted.index(AUDIT_MONTH)
+                if audit_idx > 0:
+                    prev_month = all_months_sorted[audit_idx - 1]
+                    prev_rent  = rent_by_m.get(prev_month, 0)
+                    curr_rent  = rent_by_m.get(AUDIT_MONTH, 0)
+                    if prev_rent >= 50 and 0 < curr_rent < prev_rent:
+                        decrease = prev_rent - curr_rent
+                        pct_drop = decrease / prev_rent
+                        if decrease >= 50 and pct_drop >= 0.05:
+                            is_ntv = rr_status_lookup.get((prop, unit), "") == "NTV"
+                            rule   = "Recurring Rent Decrease (NTV)" if is_ntv else "Recurring Rent Decrease"
+                            flags.append(make_flag(prop, unit, resident,
+                                rule,
+                                f"Recurring rent dropped from ${prev_rent:.0f} ({prev_month}) "
+                                f"to ${curr_rent:.0f} ({AUDIT_MONTH}) "
+                                f"\u2014 decrease ${decrease:.0f} ({pct_drop*100:.0f}%). "
+                                + ("Status NTV \u2014 verify prorated rent is through actual key return date."
+                                   if is_ntv else
+                                   "Not tied to scheduled move-out \u2014 verify lease/renewal change."),
+                                decrease, src))
+
     # =========================================================================
     # STAGE 2 -- POSTED RENT ROLL AUDIT
     # =========================================================================
@@ -1579,8 +1638,9 @@ def run_revenue_integrity_engine(
         print("  [STAGE 2] Posted Rent Roll Audit ...")
         rr = df_rent_roll.copy()
 
-        # Only audit occupied units (C=Current, MTM=Month-to-Month, NTV=Notice to Vacate)
-        rr = rr[rr["Status"].isin(["C", "MTM", "NTV"])]
+        # Audit occupied units. 'R' = Renewed (active lease, renewal in progress).
+        # Per Daniel: do not skip NTV, eviction, or notice residents.
+        rr = rr[rr["Status"].isin(["C", "MTM", "NTV", "R"])]
 
         # Build move-in lookup from activity, fall back to lease start
         movein_lookup = {}
@@ -1700,6 +1760,16 @@ def run_revenue_integrity_engine(
                     # Using the SMALLER of the two values vs the LARGER avoids
                     # both directions in a single check.
                     if min(recurring_rent, posted_rent) < max(recurring_rent, posted_rent) * 0.60:
+                        # NTV units with large prorations: reclassify as VERIFY rather than skip
+                        if grp["Status"].iloc[0] == "NTV" and posted_rent < recurring_rent:
+                            resident = grp["Residents"].iloc[0]
+                            src      = grp["Source_File"].iloc[0]
+                            flags.append(make_flag(prop, unit, resident,
+                                "NTV Proration",
+                                f"Status NTV. Recurring rent ${recurring_rent:.0f}, "
+                                f"posted ${posted_rent:.0f} — likely prorated through scheduled move-out. "
+                                f"Verify prorated rent is through actual key return date.",
+                                recurring_rent - posted_rent, src))
                         continue
                     var = recurring_rent - posted_rent
                     if abs(var) > 5.0:
@@ -1721,10 +1791,19 @@ def run_revenue_integrity_engine(
                                 f"A rent increase may have been applied to the Rent Roll "
                                 f"but the recurring charge was not updated to match."
                             )
-                        flags.append(make_flag(prop, unit, resident,
-                            "Posted vs Recurring Mismatch",
-                            direction_detail,
-                            abs(var), src))
+                        unit_status = grp["Status"].iloc[0]
+                        if unit_status == "NTV" and var > 0:
+                            flags.append(make_flag(prop, unit, resident,
+                                "NTV Proration",
+                                f"Status NTV. Recurring rent ${recurring_rent:.0f}, "
+                                f"posted ${posted_rent:.0f} — likely prorated through scheduled move-out. "
+                                f"Verify prorated rent is through actual key return date.",
+                                abs(var), src))
+                        else:
+                            flags.append(make_flag(prop, unit, resident,
+                                "Posted vs Recurring Mismatch",
+                                direction_detail,
+                                abs(var), src))
 
         # 4.4 -- MISC TENANT CREDIT REVIEW
         if not df_trans.empty:
@@ -1905,6 +1984,7 @@ def calculate_exposure(flags_df: pd.DataFrame) -> dict:
         "Critical_Flags":      (df["Risk_Level"] == RISK_CRITICAL).sum(),
         "High_Flags":          (df["Risk_Level"] == RISK_HIGH).sum(),
         "Medium_Flags":        (df["Risk_Level"] == RISK_MEDIUM).sum(),
+        "Verify_Flags":        (df["Risk_Level"] == RISK_VERIFY).sum(),
         "Avg_Flags_Per_Unit":   round(len(df) / max(df["Unit"].nunique(), 1), 1),
     }])
 
@@ -1932,6 +2012,7 @@ RISK_FILLS = {
     RISK_CRITICAL: PatternFill("solid", fgColor="FF4B4B"),
     RISK_HIGH:     PatternFill("solid", fgColor="FFA500"),
     RISK_MEDIUM:   PatternFill("solid", fgColor="FFD700"),
+    RISK_VERIFY:   PatternFill("solid", fgColor="A8D8A8"),   # light green — verify only
 }
 
 HEADER_FILL  = PatternFill("solid", fgColor="1F4E79")

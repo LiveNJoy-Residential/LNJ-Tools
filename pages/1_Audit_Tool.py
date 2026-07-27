@@ -22,7 +22,7 @@ from audit_bot import (
     run_full_audit,
     APPROVED_CODES,
     AUDIT_MONTH,
-    RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM,
+    RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM, RISK_VERIFY,
     PROPERTY_FEE_SCHEDULE,
 )
 
@@ -43,6 +43,7 @@ RISK_COLORS = {
     RISK_CRITICAL: "#FF4B4B",
     RISK_HIGH:     "#FFA500",
     RISK_MEDIUM:   "#FFD700",
+    RISK_VERIFY:   "#A8D8A8",   # light green — verify only
 }
 
 def color_risk(val):
@@ -382,10 +383,11 @@ with tab1:
 
         st.divider()
         st.subheader("Flags by Risk Level")
-        rc1, rc2, rc3 = st.columns(3)
+        rc1, rc2, rc3, rc4 = st.columns(4)
         rc1.metric("🔴 CRITICAL", int(row.get("Critical_Flags", 0)))
         rc2.metric("🟠 HIGH",     int(row.get("High_Flags", 0)))
         rc3.metric("🟡 MEDIUM",   int(row.get("Medium_Flags", 0)))
+        rc4.metric("🟢 VERIFY",   int(row.get("Verify_Flags", 0)))
 
     st.divider()
     st.subheader("All Exceptions")
@@ -394,8 +396,8 @@ with tab1:
         cols = st.columns(3)
         with cols[0]:
             risk_filter = st.multiselect("Filter by Risk",
-                [RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM],
-                default=[RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM])
+                [RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM, RISK_VERIFY],
+                default=[RISK_CRITICAL, RISK_HIGH, RISK_MEDIUM, RISK_VERIFY])
         with cols[1]:
             prop_options = ["All"] + sorted(all_flags["Property"].dropna().unique().tolist())
             prop_filter = st.selectbox("Filter by Property", prop_options)
@@ -640,7 +642,7 @@ with tab6:
         drilldown = all_flags if selected_prop == "All" else all_flags[all_flags["Property"] == selected_prop]
         drilldown_sorted = drilldown.sort_values(
             ["Risk_Level", "Amount_Impact"],
-            key=lambda col: col.map({RISK_CRITICAL: 0, RISK_HIGH: 1, RISK_MEDIUM: 2}) if col.name == "Risk_Level" else col,
+            key=lambda col: col.map({RISK_CRITICAL: 0, RISK_HIGH: 1, RISK_MEDIUM: 2, RISK_VERIFY: 3}) if col.name == "Risk_Level" else col,
             ascending=[True, False]
         )
         st.dataframe(styled_df(drilldown_sorted), width='stretch', hide_index=True)
