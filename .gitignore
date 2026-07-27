@@ -21,6 +21,7 @@ exports/
 
 # Data — CSV source files (not committed — contain resident PII)
 data/
+!data/verified_baseline.csv
 
 # OS
 .DS_Store
