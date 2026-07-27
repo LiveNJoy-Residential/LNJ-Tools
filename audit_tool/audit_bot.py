@@ -98,7 +98,7 @@ OPTIONAL_CHARGE_KEYWORDS = {
 # NER = recurring_rent + recurring_concession  (concession is stored negative).
 # Flag when NER < floor â€” catches double-discounts and below-floor net rents.
 PROPERTY_NER_FLOORS = {
-    "Parks on Taylor":     {"1BR": 799, "2BR": 899},
+    "Parks on Taylor":     {"1BR": 799, "2BR": 849},   # 2BR floor updated 4/30/2026
     "Highland Park":       {"1BR": 799, "2BR": 999},
     "Valencia Plaza":      {"1BR": 999, "2BR": 999},
     "Western Station":     {"1BR": None, "2BR": None},   # floor varies by floorplan
