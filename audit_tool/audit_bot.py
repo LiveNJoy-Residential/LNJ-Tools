@@ -1808,14 +1808,28 @@ def run_revenue_integrity_engine(
                             flags.append(make_flag(prop, unit, resident,
                                 "NTV Proration",
                                 f"Status NTV. Recurring rent ${recurring_rent:.0f}, "
-                                f"posted ${posted_rent:.0f} — likely prorated through scheduled move-out. "
+                                f"posted ${posted_rent:.0f} \u2014 likely prorated through scheduled move-out. "
                                 f"Verify prorated rent is through actual key return date.",
                                 abs(var), src))
                         else:
-                            flags.append(make_flag(prop, unit, resident,
-                                "Posted vs Recurring Mismatch",
-                                direction_detail,
-                                abs(var), src))
+                            # Check if posted rent = NER (concession embedded in rent).
+                            # Pattern: manager posts net amount directly rather than
+                            # gross rent + separate concession line. If posted_rent
+                            # matches projection NER (rent + concession), it is not
+                            # an error — just a different accounting structure.
+                            conc_sub = df_projection[
+                                (df_projection["Property"] == prop) &
+                                (df_projection["Unit"]     == unit) &
+                                df_projection["Category"].str.lower().str.contains("concession") &
+                                (df_projection["Amount"] < 0)
+                            ]["Amount"].sum()
+                            if conc_sub < 0 and abs((recurring_rent + conc_sub) - posted_rent) < 15:
+                                pass  # concession embedded in posted rent \u2014 not an error
+                            else:
+                                flags.append(make_flag(prop, unit, resident,
+                                    "Posted vs Recurring Mismatch",
+                                    direction_detail,
+                                    abs(var), src))
 
         # 4.4 -- MISC TENANT CREDIT REVIEW
         if not df_trans.empty:
@@ -2359,6 +2373,39 @@ def run_full_audit(uploaded_files=None, audit_month=None) -> dict:
     concession_flags        = apply_verified_baseline(concession_flags, _baseline)
     revenue_integrity_flags = apply_verified_baseline(revenue_integrity_flags, _baseline)
     fee_flags               = apply_verified_baseline(fee_flags, _baseline)
+
+    # -- Cross-engine deduplication -------------------------------------------
+    # Units that Stage 1B flagged as "Future Month Full Offset" (VERIFY) have
+    # their concession embedded in the posted rent price.  Any "Posted vs
+    # Recurring Mismatch" HIGH or "Recurring Concession >$700" HIGH flag for
+    # the same unit is a data-structure artifact, not an error.  Downgrade to
+    # VERIFY so they stay visible but don't inflate the HIGH count.
+    if not revenue_integrity_flags.empty:
+        fmo_mask = revenue_integrity_flags["Rule"] == "Future Month Full Offset"
+        verify_units = set(
+            zip(revenue_integrity_flags.loc[fmo_mask, "Property"],
+                revenue_integrity_flags.loc[fmo_mask, "Unit"].astype(str))
+        )
+        if verify_units:
+            for flags_df, rules in [
+                (revenue_integrity_flags, {"Posted vs Recurring Mismatch"}),
+                (concession_flags,        {"Recurring Concession >$700"}),
+            ]:
+                if flags_df is None or flags_df.empty:
+                    continue
+                dn_mask = (
+                    flags_df["Rule"].isin(rules) &
+                    flags_df.apply(
+                        lambda r: (r["Property"], str(r["Unit"])) in verify_units, axis=1
+                    )
+                )
+                if dn_mask.any():
+                    flags_df.loc[dn_mask, "Risk_Level"] = RISK_VERIFY
+                    flags_df.loc[dn_mask, "Detail"] = (
+                        "[NER embedded in posted rent \u2014 one-month-free unit] "
+                        + flags_df.loc[dn_mask, "Detail"]
+                    )
+                    print(f"  [DEDUP] {dn_mask.sum()} flags \u2192 VERIFY (NER-embedded, one-month-free unit).")
 
     # -- Combine + exposure ---------------------------------------------------
     all_flags = (pd.concat([concession_flags, revenue_integrity_flags, fee_flags], ignore_index=True)
