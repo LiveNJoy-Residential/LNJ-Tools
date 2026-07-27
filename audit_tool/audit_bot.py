@@ -1425,10 +1425,22 @@ def run_revenue_integrity_engine(
                 src      = grp["Source_File"].iloc[0]
 
                 if amt > CONCESSION_CRITICAL_AMT:
+                    # Skip full-rent-offset concessions — Stage 1B already flags
+                    # these as Full Rent Recurring Offset (CRITICAL) or Future Month
+                    # Full Offset (VERIFY). Emitting a duplicate HIGH here is noise.
+                    rent_for_unit = proj[
+                        (proj["Property"] == prop) &
+                        (proj["Unit"]     == unit) &
+                        proj["Cat_Lower"].str.contains(r"\brent\b", regex=True) &
+                        ~proj["Cat_Lower"].str.contains("concession") &
+                        (proj["Amount"] > 0)
+                    ]["Amount"].sum()
+                    if rent_for_unit > 0 and abs(amt - rent_for_unit) < 15:
+                        continue  # Full-rent offset handled by Stage 1B
                     flags.append(make_flag(prop, unit, resident,
                         "Recurring Concession >$700",
                         f"Recurring concession -${amt:.0f}/mo in {AUDIT_MONTH}. "
-                        f"Single monthly concession exceeds $700 â€” requires VP approval.",
+                        f"Single monthly concession exceeds $700 — requires VP approval.",
                         amt, src))
 
                 elif abs(amt - 500) < 1.0:
@@ -1887,7 +1899,11 @@ def run_fee_schedule_check(df_projection: pd.DataFrame) -> pd.DataFrame:
                         and round(actual_amt % fee["amount"], 2) == 0.0):
                     continue
 
-                if variance >= 1.0:
+                # For optional charges (pet rent, parking, W/D), only flag if
+                # variance is > $10. Per Daniel: for POT/HP focus on presence/
+                # absence, not small amount differences.
+                min_variance = 10.0 if fee.get("optional", False) else 1.0
+                if variance >= min_variance:
                     flags.append(make_flag(
                         prop, unit, resident,
                         "Fee Schedule Violation",
