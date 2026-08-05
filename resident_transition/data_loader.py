@@ -13,10 +13,16 @@ import re
 import numpy as np
 import pandas as pd
 
-from utils import (
-    _csv_files, _read_csv, derive_property,
-    clean_currency, clean_unit, parse_date, clean_name,
-)
+try:
+    from .utils import (
+        _csv_files, _read_csv, derive_property,
+        clean_currency, clean_unit, parse_date, clean_name,
+    )
+except ImportError:
+    from utils import (
+        _csv_files, _read_csv, derive_property,
+        clean_currency, clean_unit, parse_date, clean_name,
+    )
 
 # ---------------------------------------------------------------------------
 # Default data folder paths (shared with parent project)

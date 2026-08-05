@@ -10,18 +10,20 @@ import io
 import pandas as pd
 import streamlit as st
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resident_transition"))
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
-from utils import route_uploaded_files
-from data_loader import (
+from resident_transition.utils import route_uploaded_files
+from resident_transition.data_loader import (
     load_leases, load_activity, load_rent_roll,
     load_scheduled_move_ins, load_cancellations_move_outs,
     load_eviction_process, load_pet_summary, load_vehicles,
     load_recurring_projections,
 )
-from move_in_engine import run_move_in_audit
-from move_out_engine import run_move_out_audit
-from eviction_engine import run_eviction_audit
+from resident_transition.move_in_engine import run_move_in_audit
+from resident_transition.move_out_engine import run_move_out_audit
+from resident_transition.eviction_engine import run_eviction_audit
 
 st.set_page_config(
     page_title="LNJ Resident Activity Audit",
