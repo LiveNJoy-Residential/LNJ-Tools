@@ -117,3 +117,37 @@ def _read_csv(fpath_or_buffer, **kwargs) -> pd.DataFrame:
         except UnicodeDecodeError:
             continue
     raise ValueError(f"Could not decode {fpath_or_buffer}.")
+
+
+# ---------------------------------------------------------------------------
+# Upload router — buckets uploaded files by report type via filename keywords
+# ---------------------------------------------------------------------------
+
+# Ordered most-specific to least-specific to avoid false matches
+_ROUTE_RULES = [
+    ("scheduled_move_ins", ["scheduled move in"]),
+    ("leases",             ["new and renewed"]),
+    ("cancellations",      ["cancellation", "denial"]),
+    ("evictions",          ["eviction"]),
+    ("activity",           ["resident activity"]),
+    ("pet_summary",        ["pet summary"]),
+    ("vehicles",           ["vehicle"]),
+    ("rent_rolls",         ["rent roll"]),
+    ("recurring",          ["recurring transaction", "transaction projection"]),
+]
+
+_ROUTE_SKIP = ["move out analysis"]
+
+
+def route_uploaded_files(uploaded_files: list) -> dict:
+    """Route Streamlit UploadedFile objects into report-type buckets by filename."""
+    buckets = {key: [] for key, _ in _ROUTE_RULES}
+    for f in uploaded_files:
+        name = f.name.lower()
+        if any(skip in name for skip in _ROUTE_SKIP):
+            continue
+        for bucket, keywords in _ROUTE_RULES:
+            if any(kw in name for kw in keywords):
+                buckets[bucket].append(f)
+                break
+    return buckets

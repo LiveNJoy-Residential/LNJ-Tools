@@ -18,6 +18,14 @@ from datetime import datetime, date, timedelta
 # Texas Property Code §92.103 — landlord must return deposit within 30 days of move-out
 TEXAS_REFUND_DAYS = 30
 
+# LNJ standard minimum notice period for voluntary move-outs
+NOTICE_DAYS_REQUIRED = 60
+
+# Severity thresholds for executive-risk prioritization.
+MO_NOTICE_CRITICAL_DAYS = 1
+MO_BALANCE_CRITICAL_AMT = 1000.0
+MO_BALANCE_MEDIUM_MAX_AMT = 100.0
+
 
 # ---------------------------------------------------------------------------
 # Flag builder
@@ -41,11 +49,16 @@ def _flag(prop, unit, resident, rule_id, rule_name, field,
     }
 
 
-def _moved_out_units(df_rr_units: pd.DataFrame) -> pd.DataFrame:
-    """Filter Rent Roll to units that have a Move_Out date recorded."""
+def _moved_out_units(df_rr_units: pd.DataFrame, audit_date=None) -> pd.DataFrame:
+    """Filter Rent Roll to units that have already vacated (Move_Out ≤ today)."""
+    if audit_date is None:
+        audit_date = pd.Timestamp.today().normalize()
     if df_rr_units.empty or "Move_Out" not in df_rr_units.columns:
         return pd.DataFrame()
-    return df_rr_units[df_rr_units["Move_Out"].notna()].copy()
+    return df_rr_units[
+        df_rr_units["Move_Out"].notna() &
+        (df_rr_units["Move_Out"] <= audit_date)
+    ].copy()
 
 
 # ===========================================================================
@@ -78,7 +91,7 @@ def run_mo1(df_rr_units: pd.DataFrame, df_rr_charges: pd.DataFrame) -> list:
         move_out  = row["Move_Out"]
         lease_end = row["Lease_End"]
 
-        if not move_out or not lease_end:
+        if not pd.notna(move_out) or not pd.notna(lease_end):
             continue
         if move_out >= lease_end:
             continue  # Normal end-of-lease move-out
@@ -148,7 +161,13 @@ def run_mo3(df_rr_units: pd.DataFrame) -> list:
 
         direction = "owes" if balance > 0 else "is owed a refund of"
         amt = abs(balance)
-        mo_str = move_out.strftime("%m/%d/%Y") if move_out else "unknown"
+        mo_str = move_out.strftime("%m/%d/%Y") if pd.notna(move_out) else "unknown"
+
+        sev = "HIGH"
+        if balance >= MO_BALANCE_CRITICAL_AMT:
+            sev = "CRITICAL"
+        elif amt < MO_BALANCE_MEDIUM_MAX_AMT:
+            sev = "MEDIUM"
 
         flags.append(_flag(
             prop, unit, resident,
@@ -159,7 +178,7 @@ def run_mo3(df_rr_units: pd.DataFrame) -> list:
             f"({mo_str}). Resident {direction} ${amt:,.2f}. "
             "Review all charges and credits. Coordinate with property manager/accounting "
             "to reconcile before submitting to collections or issuing refund.",
-            "HIGH", src,
+            sev, src,
         ))
 
     return flags
@@ -194,7 +213,7 @@ def run_mo4(df_rr_units: pd.DataFrame, audit_date: date = None) -> list:
         balance  = row["Balance"]
         move_out = row["Move_Out"]
 
-        if not move_out or balance == 0.0:
+        if not pd.notna(move_out) or balance == 0.0:
             continue
 
         mo_date = move_out.date() if hasattr(move_out, "date") else move_out
@@ -228,7 +247,7 @@ def run_mo4(df_rr_units: pd.DataFrame, audit_date: date = None) -> list:
                     f"Refund of ${refund_amt:,.2f} must be issued by "
                     f"{deadline.strftime('%m/%d/%Y')} ({remaining} days remaining). "
                     "Texas Property Code §92.103.",
-                    "HIGH", src,
+                    "CRITICAL", src,
                 ))
 
         elif balance > 0 and days_since > TEXAS_REFUND_DAYS:
@@ -314,29 +333,140 @@ def run_mo5(df_rr_units: pd.DataFrame) -> list:
 # Main runner
 # ===========================================================================
 
+# ===========================================================================
+# MO-1 extension: Notice Sufficiency Check
+# ===========================================================================
+
+def run_mo1_notice(df_cancel: pd.DataFrame) -> list:
+    """
+    Residents who gave fewer than 60 days notice before a voluntary move-out.
+    Excludes evictions. Requires the Cancellations & Move Outs CSV.
+    """
+    flags = []
+    if df_cancel.empty:
+        return flags
+
+    moved_out = df_cancel[df_cancel["Section"] == "Moved Out"].copy()
+
+    for _, row in moved_out.iterrows():
+        prop   = row["Property"]
+        unit   = row["Unit"]
+        res    = row["Residents"]
+        src    = row["Source_File"]
+        notice = str(row.get("Days_Notice", "")).strip()
+        reason = str(row.get("Move_Out_Reason", "")).strip()
+
+        # Skip involuntary/emergency departures — 60-day notice only applies to voluntary moves
+        _EXEMPT = ["eviction", "onsite transfer", "skipped", "owes money", "no notice",
+                   "death", "illness", "disaster"]
+        if any(kw in reason.lower() for kw in _EXEMPT):
+            continue
+        try:
+            days = int(notice)
+        except (ValueError, TypeError):
+            continue
+
+        if days < NOTICE_DAYS_REQUIRED:
+            sev = "CRITICAL" if days <= MO_NOTICE_CRITICAL_DAYS else "HIGH"
+            flags.append(_flag(
+                prop, unit, res,
+                "MO-1", "Notice Sufficiency & Lease Break Fee Audit",
+                "Days Notice Given",
+                f"{days} days", f"{NOTICE_DAYS_REQUIRED} days required",
+                f"Resident gave {days} day(s) notice before vacating "
+                f"(reason: {reason or 'not recorded'}). "
+                f"LNJ requires {NOTICE_DAYS_REQUIRED} days. Verify whether additional "
+                "charges or lease-break fees apply.",
+                sev, src,
+            ))
+
+    return flags
+
+
+# ===========================================================================
+# MO-2: Move-Out Reason & Tag Consistency
+# ===========================================================================
+
+def run_mo2(df_cancel: pd.DataFrame, df_ev: pd.DataFrame = None) -> list:
+    """
+    FR-5.2: Move-out reason must be set in ResMan and consistent with the eviction record.
+
+    Checks:
+      - Moved-out unit has a blank/missing reason
+      - Reason is 'Eviction or Problems' but no matching Eviction Process record exists
+    """
+    flags = []
+    if df_cancel.empty:
+        return flags
+
+    moved_out = df_cancel[df_cancel["Section"] == "Moved Out"].copy()
+
+    ev_keys = set()
+    if df_ev is not None and not df_ev.empty:
+        ev_keys = set(zip(df_ev["Property"], df_ev["Unit"]))
+
+    for _, row in moved_out.iterrows():
+        prop   = row["Property"]
+        unit   = row["Unit"]
+        res    = row["Residents"]
+        src    = row["Source_File"]
+        reason = str(row.get("Move_Out_Reason", "")).strip()
+
+        if not reason or reason.lower() in ("nan", "", "none"):
+            flags.append(_flag(
+                prop, unit, res,
+                "MO-2", "Move-Out Reason & Tag Consistency",
+                "Move-Out Reason",
+                "Blank", "Required",
+                f"No move-out reason is recorded in ResMan for unit {unit}. "
+                "A reason must be entered on the Resident card before the "
+                "move-out can be considered complete.",
+                "MEDIUM", src,
+            ))
+            continue
+        # Note: eviction-without-filing check removed — Eviction Process CSV only shows active cases
+
+    return flags
+
+
+# ===========================================================================
+# Main runner
+# ===========================================================================
+
 def run_move_out_audit(df_rr_units: pd.DataFrame,
                        df_rr_charges: pd.DataFrame,
+                       df_cancel: pd.DataFrame = None,
+                       df_ev: pd.DataFrame = None,
                        audit_date: date = None) -> pd.DataFrame:
     """
     Run all Phase 1 Move-Out audit rules against the loaded DataFrames.
     Returns a DataFrame of all exceptions found.
     """
-    if df_rr_units.empty:
-        print("  [WARN] No Rent Roll data — Move-Out audit skipped.")
-        return pd.DataFrame()
+    _cancel = df_cancel if df_cancel is not None else pd.DataFrame()
+    _ev     = df_ev     if df_ev     is not None else pd.DataFrame()
 
-    moved_out_count = df_rr_units["Move_Out"].notna().sum() if "Move_Out" in df_rr_units.columns else 0
-    print(f"\n--- Move-Out Audit ({moved_out_count} moved-out units) ---")
-
-    if moved_out_count == 0:
-        print("  No moved-out units found in Rent Roll.")
-        return pd.DataFrame()
+    moved_out_count = (
+        df_rr_units["Move_Out"].notna().sum()
+        if not df_rr_units.empty and "Move_Out" in df_rr_units.columns else 0
+    )
+    print(f"\n--- Move-Out Audit ({moved_out_count} moved-out units in Rent Roll) ---")
 
     flags = []
-    flags.extend(run_mo1(df_rr_units, df_rr_charges))
-    flags.extend(run_mo3(df_rr_units))
-    flags.extend(run_mo4(df_rr_units, audit_date))
-    flags.extend(run_mo5(df_rr_units))
+    # Rules that run from Cancellations CSV (no Rent Roll required)
+    flags.extend(run_mo1_notice(_cancel))
+    flags.extend(run_mo2(_cancel, _ev))
+
+    # Rules that require Rent Roll data
+    if not df_rr_units.empty and moved_out_count > 0:
+        _mo1_etf = run_mo1(df_rr_units, df_rr_charges)
+        # Remove ETF flags for units already covered by the Evictions engine
+        if not _ev.empty:
+            _ev_keys = set(zip(_ev["Property"], _ev["Unit"]))
+            _mo1_etf = [f for f in _mo1_etf if (f["Property"], f["Unit"]) not in _ev_keys]
+        flags.extend(_mo1_etf)
+        flags.extend(run_mo3(df_rr_units))
+        flags.extend(run_mo4(df_rr_units, audit_date))
+        flags.extend(run_mo5(df_rr_units))
 
     if not flags:
         print("  No Move-Out exceptions found.")
